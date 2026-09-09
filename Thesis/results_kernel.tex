@@ -1,0 +1,1479 @@
+% =====================================================================
+%  Results chapter: architecture, optimiser, and paradigm through the
+%  tangent kernel. UNIFIED draft.
+%
+%  Supersedes the split between the earlier kernel draft (message
+%  passing in the JASTROW) and results_backflow.tex (message passing in
+%  the BACKFLOW): both are the same relational-channel idea seen through
+%  the tangent kernel, and are merged here. All numbers are on the
+%  thesis ansatz at DMC-quality energies; seed counts are stated.
+% =====================================================================
+\graphicspath{{../results/figures/results/}{../results/figures/results/kernel/}{../results/figures/}}
+\chapter{Architecture, optimisation and sampling}
+\label{ch:kernel}
+
+The previous chapter showed that the ansatz works: it reaches reference quality wherever a
+reference exists, and the states it produces carry the staged Wigner-molecule structure the
+diagnostics were built to detect. Why the solver can represent those states, and what
+governs whether they can be trained at all, are separate and harder questions.
+
+Three observations from that chapter remain unexplained. Two networks of the same size,
+trained the same way and landing on the same energy, need not be the same object. A
+natural-gradient step that is decisive in one training regime does nothing in another. And
+an importance-sampled objective reproduces a Markov chain's answer in one corner of the
+phase diagram and departs from it in the next.
+
+All three can be examined through the per-sample, column-centred log-derivative matrix
+\begin{equation}
+  O_{ki} \;=\; \frac{\partial \log|\Psi_{\btheta}(\bx_k)|}{\partial \theta_i},
+  \qquad k=1,\dots,B,\;\; i=1,\dots,P,
+  \label{eq:kernel-O}
+\end{equation}
+and on its two Gram matrices, the quantum geometric tensor $S = O^{\!\top}O / B$ and the
+neural tangent kernel $K = OO^{\!\top}$~\cite{JacotEtAl2018-NTK,StokesEtAl2020-QuantumNaturalGradient}.
+That gives the chapter its structure:
+
+\begin{quote}
+\emph{Architecture} determines the shape of the tangent space.\\
+The \emph{optimiser} acts on it through its metric.\\
+The \emph{sampling measure} determines how well that metric can be estimated.
+\end{quote}
+
+\noindent The chapter takes them in that order. The instrument throughout is the \emph{effective dimension} of the tangent space---the
+participation ratio of the QGT spectrum $\{\lambda_a\}$,
+\begin{equation}
+  d_{\mathrm{eff}}(S) \;=\; \frac{\left(\sum_a \lambda_a\right)^2}{\sum_a \lambda_a^2},
+  \label{eq:deff}
+\end{equation}
+which counts how many directions actually carry Fisher weight, whatever the parameter
+count says. Beside it sit the local-energy variance $\Var(E_L)$, zero only for an exact
+eigenstate; the effective sample size; and the condition number $\kappa(S)$, which is
+reported in \S\ref{sec:kernel-cond} and turns out to be large everywhere and therefore
+diagnostic of nothing by itself.
+
+Architectures are compared on a common probe set---the same configurations for every model,
+never each model's own $|\Psi|^2$---and below $\omega=0.1$ every relative error is measured
+against our own converged variational energies, so it reports internal consistency rather
+than accuracy. The tooling is anchored on the analytic two-electron ground state, where the
+ansatz returns $E=3.000127$~Ha ($+0.004\%$) at squared overlap $1.000000$.
+
+% =====================================================================
+\section{Message passing and the variational geometry}
+\label{sec:kernel-q1}
+
+What does a message-passing network learn that a separable one cannot? Both learnable
+objects of the ansatz can be built in either form, so the question is asked twice, changing
+one object at a time. In the first comparison only the \emph{correlator} is swapped, a separable network against the message-passing one, while the backflow, the Slater
+reference, the analytic cusp, the training protocol and the capacity tier all stay as they
+are. In the second only the \emph{backflow} is swapped, single-round pairwise messages against the copresheaf network, with the correlator now among the things held fixed. Neither
+comparison varies the two together.
+
+\subsection{The correlator: tangent-space compression}
+\label{sec:kernel-q1a}
+
+At $N=6$, $\omega=1$ the two correlators are indistinguishable in energy. Trained to DMC
+quality across a $20$k--$164$k parameter ladder, every model lands within $\pm0.1\%$ of the
+reference, and the best raw energy belongs to a $164$k separable network---twice the
+message-passing parameter count. Both have saturated the variational floor.
+
+Their tangent geometry is not indistinguishable. On a common probe set the message-passing
+correlator reaches the ground state in $d_{\mathrm{eff}}\approx1.2$--$1.7$ over three seeds,
+where every separable network needs $2.9$--$3.6$; the two sets do not overlap, and their
+closest approach is still a factor of $1.8$. Capacity does not close the gap. Scaling the
+separable network eightfold, from $20$k to $164$k parameters, moves its effective dimension
+only from $3.6$ to $2.9$, and the $89$k network that matches the message-passing one in size
+sits at $3.6$. Nor does the probe measure: the gap moves by at most $0.26$ whether scored on
+either family's samples or on pooled points. With three and four runs respectively we report the values, not a sigma-separation, which at these sample sizes would borrow more
+authority than the design supports.
+
+\begin{figure}[htbp]\centering
+  \includegraphics[width=0.95\textwidth]{fair_dimension.png}
+  \caption[Message passing compresses the correlator]{Message passing compresses the correlator ($N{=}6$, $\omega{=}1$).
+  \emph{Left:} the effective rank of the quantum geometric tensor on a common pooled probe,
+  converged in the number of probe samples. \emph{Right:} the same pooled measure per model.
+  The CTNN (blue) reaches the ground state in $d_{\mathrm{eff}}\!\approx\!1.2$--$1.7$, while
+  every DeepSet (red) needs $\approx\!2.9$--$3.6$---and the gap does not close as the DeepSet
+  is scaled from $20$k to $164$k parameters. The compression is architectural, not a matter
+  of capacity.}
+  \label{fig:q1a-fairdim}
+\end{figure}
+
+Two things bound the reading. The comparison is made with no backflow present, so there is
+no correlation to divide between substitutable channels and the gauge caveat of
+\S\ref{sec:synthesis} does not arise. And the gap is a \emph{strong-confinement} effect: it
+closes toward the Wigner crystal, where both families reach ${\sim}3.7$ but occupy different
+tangent subspaces. A single-seed dimension inversion at the crystal, reported in an earlier
+draft, did not survive seeding and is retracted.
+
+\paragraph{Local-energy variance.} $d_{\mathrm{eff}}$
+stops separating the families at the crystal, and rank will turn out to be gauge-like
+(\S\ref{sec:synthesis}). The local-energy variance does neither: it is defined on the
+state, vanishes only for an exact eigenstate, and is directly comparable between any two
+ansätze evaluated on their own $|\Psi|^2$. Measured at matched training protocol,
+$\Var(E_L)$ is lower for the message-passing correlator at every confinement
+(Table~\ref{tab:varEL}), by factors between $1.2$ and $3.4$, while the two are
+indistinguishable in energy.
+
+Two things fix the size of that effect. At the crystal, where a seeded replication exists,
+the three-seed sets do not overlap---$(1.95,1.63,1.96)\times10^{-5}$ against
+$(3.40,3.23,3.41)\times10^{-5}$---and their means differ by $1.8$, not the $7.4$ obtained by
+pairing single best runs, which is why the seeded ratio is the one quoted. And capacity
+works the other way: the production rows give the message-passing network a $1.7\times$ size
+advantage, but repeating $\omega=1$ against the capacity-matched $89.4$k separable network
+widens the ratio to $3.4$ instead of closing it. Intermediate confinements
+($\omega=0.28,\,0.05,\,0.03$) reproduce the ordering at ratios $1.2$--$1.8$. It is not
+resolved at the smallest depth-analysis tier ($12$k against $9$k), where the two sit within
+$8\%$, so this is a statement about trained models at production width rather than about the
+architectures at any size.
+
+\begin{table}[htbp]\centering
+\caption[Local-energy variance by architecture]{Local-energy variance at $N{=}6$, matched training protocol, both architectures at
+reference-quality energy ($|{\rm err}|\le0.13\%$). Lower is better; $\Var(E_L)\to0$ only for
+an exact eigenstate. The basis column gives the evidential status of each row: the $\omega=0.01$ row is a
+three-seed mean, the rest are single runs of the production cascade. The unseeded rows
+establish the ordering, which never reverses, and not the precise factor
+(\S\ref{sec:kernel-q1a}). The last row repeats $\omega=1$ against the capacity-matched
+$89.4$k separable network.}
+\label{tab:varEL}
+\begin{tabular}{lcccc}
+\hline
+$\omega$ & CTNN & DeepSet & ratio & basis \\
+\hline
+$1.0$  & $1.09\times10^{-2}$ & $2.51\times10^{-2}$ & $2.3$ & single run, $79.8$k vs $47.7$k \\
+$0.5$  & $4.62\times10^{-3}$ & $1.01\times10^{-2}$ & $2.2$ & single run, $79.8$k vs $47.7$k \\
+$0.1$  & $5.63\times10^{-4}$ & $1.14\times10^{-3}$ & $2.0$ & single run, $79.8$k vs $47.7$k \\
+$0.01$ & $1.85\times10^{-5}$ & $3.35\times10^{-5}$ & $1.8$ & 3-seed mean, $79.8$k vs $47.7$k \\
+\hline
+$1.0$  & $2.75\times10^{-2}$ & $9.38\times10^{-2}$ & $3.4$ & matched, $79.8$k vs $89.4$k \\
+\hline
+\end{tabular}
+\end{table}
+
+\paragraph{Naming the leading tangent directions, at every size.} The leading tangent directions are not
+abstract. At the exact $N=2$ anchor an operator decomposition identifies them, to
+$R^2=1.00$, as the physical collective modes of $H$---a breathing mode
+($\partial_\omega$), a correlation-hole mode, and the first relative excitation. This is not
+special to two bodies. Projecting the leading tangent mode of trained correlators onto a
+dictionary of physical operators (breathing/monopole, quadrupole, correlation-hole,
+pair-linear), seed-averaged over well-trained checkpoints (energy within $1.5\%$ of
+reference), the CTNN reaches $R^2\!\gtrsim\!0.93$ at $N=6$ and $R^2\!\approx\!1.00$ at $N=12$
+across the whole confinement range $\omega\in[0.01,1]$, and both architectures reproduce the
+$N=2$ naming at strong confinement (Fig.~\ref{fig:mode-naming}). The message-passing
+correlator finds the ground state by moving along the handful of coordinates the Hamiltonian
+actually couples.
+
+\begin{figure}[htbp]\centering
+  \includegraphics[width=0.8\textwidth]{mode_naming_scan.png}
+  \caption[The leading tangent mode is a nameable physical mode]{The leading tangent mode is a nameable physical mode. $R^2$ of the correlator's
+  leading tangent-kernel eigenmode onto the physical-operator dictionary, seed-averaged over
+  well-trained checkpoints. The CTNN stays physical at every $\omega$ and both sizes; the
+  DeepSet matches it down to $\omega\!\approx\!0.1$ and then loses the leading mode entirely
+  in the deep-Wigner regime. Three seeds at $\omega=0.01$.}
+  \label{fig:mode-naming}
+\end{figure}
+
+\paragraph{The dominant mode is not the tangent space.} Figure~\ref{fig:mode-naming} scores
+the \emph{dominant} eigenmode against the dictionary; Fig.~\ref{fig:nonphys} asks where the
+eigenvalue-weighted mass of the leading modes \emph{as a whole} lies. A network can place its
+largest mode squarely inside the dictionary and spend most of the rest outside it, which is
+what the separable network does---so the leading-mode score is generous to it. At $\omega=1$
+it is nominally the more physical of the two ($R^2\approx0.996$ against $0.991$), with
+energies identical to four figures. Write the
+eigenvalue-weighted fraction of the top tangent modes lying \emph{outside} the
+physical-operator span as the \emph{dictionary-orthogonal tangent mass}. The DeepSet carries a large
+excess at \emph{every} confinement---$0.44$ against the CTNN's $0.06$ at $\omega=1$, a gap of
+$\sim\!0.3$--$0.5$ that persists from the strongly-confined limit down to the crystal
+(Fig.~\ref{fig:nonphys}). The reading is that a separable network reaches the same energy---correlation being a small
+fraction of the total at strong confinement, so the energy looks converged---while leaving
+nearly half its tangent budget along directions a compact physical dictionary does not resolve.
+A direction outside the dictionary need not be unphysical, so what the measurement supports
+is that one tangent space is far more completely accounted for by a small set of physical
+operators than the other. One objection is worth answering: a smaller $d_{\mathrm{eff}}$
+makes a four-operator dictionary easier to cover, so the two results could be the same
+result. They are not. Toward the Wigner regime the two effective dimensions converge to
+${\sim}3.7$ while the dictionary gap persists undiminished. The gap is present at every
+confinement; weak confinement merely removes the disguise, because there correlation
+\emph{is} the energy. At $N=12$ the contrast is starker still: the CTNN's dictionary-orthogonal mass stays
+$\lesssim\!0.02$ across $\omega$, while a matched DeepSet (trained to $+0.2\%$) sits at
+$\approx\!0.77$ at $\omega=1$---the gap \emph{widens} with system size rather than closing.
+
+\begin{figure}[htbp]\centering
+  \includegraphics[width=0.72\textwidth]{nonphys_mass.png}
+  \caption[Dictionary-orthogonal tangent mass against $\omega$]{A limitation visible where the energy cannot see it. Dictionary-orthogonal tangent mass---the
+  eigenvalue-weighted tangent variance outside the span of a compact physical-operator
+  dictionary---versus $\omega$. At
+  $\omega=1$ the two correlators are indistinguishable in energy ($-0.001\%$) and in
+  leading-mode physicality, yet the DeepSet already spends $44\%$ of its tangent variance on
+  directions not resolved by the chosen physical-operator dictionary, against the CTNN's $6\%$. The excess is roughly constant
+  in $\omega$: the gap is present throughout, disguised at high $\omega$ only because
+  correlation is a small slice of the energy there.}
+  \label{fig:nonphys}
+\end{figure}
+
+\subsection{The backflow: rank collapse and its absence}
+\label{sec:kernel-q1b}
+
+The same relational channel is decisive, in a sharper form, in the backflow. Here we fix
+the correlator, the data, the protocol and the optimiser---the matrix-free CG solve of
+\S\ref{sec:sr-stage}, using the Woodbury identity to apply $(S+\lambda I)^{-1}$ through the
+$B\times B$ kernel rather than the $P\times P$ metric, which is what makes it affordable at
+$B\ll P$---and vary only the backflow architecture (conventional single-round messages
+vs.\ the copresheaf network), training both to convergence.
+
+Unlike the correlator comparison, this one is \emph{not} capacity-matched. At the shared
+production width the
+copresheaf network carries $182$k parameters against the conventional network's $51$k,
+because a persistent edge state is intrinsically heavier than a per-particle aggregate
+(\S\ref{sec:hyperparameters}); no matched pair was trained. A raw energy gap between the two
+is therefore not by itself evidence about architecture. What does separate the two
+explanations is set out after the rank measurement, and it is internal to the conventional
+network rather than a comparison between networks. At $\omega=1$ both reach reference
+quality, but they diverge as the trap weakens (Table~\ref{tab:bf_energies}): the
+CTNN backflow stays within $0.01$--$0.12\%$ across all $N,\omega$, while the
+conventional backflow degrades to $+0.58\%$ at $N=6,\omega=0.01$ and $\sim\!6\times$
+the CTNN error at $N=20,\omega=0.01$ ($+0.69\%$ vs.\ $+0.12\%$).
+
+\begin{table}[htbp]\centering
+\caption{Relative energy error (\%) of the two backflow architectures, seed-averaged.}
+\label{tab:bf_energies}
+\begin{tabular}{l|cc|cc|cc}
+\hline
+ & \multicolumn{2}{c|}{$N=6$} & \multicolumn{2}{c|}{$N=12$} & \multicolumn{2}{c}{$N=20$}\\
+$\omega$ & CTNN & conv & CTNN & conv & CTNN & conv \\
+\hline
+1.0  & $-0.03$ & $+0.06$ & $-0.01$ & $+0.04$ & $+0.06$ & $+0.07$ \\
+0.1  & $-0.05$ & $+0.16$ & $+0.01$ & $+0.16$ & $+0.02$ & $+0.18$ \\
+0.01 & $-0.04$ & $+0.58$ & $-0.01$ & $+0.54$ & $+0.12$ & $+0.69$ \\
+\hline
+\end{tabular}
+\end{table}
+
+\paragraph{How component-level numbers are read.}
+\label{sec:synthesis}
+The measurement that follows is of a different kind from the energy, and the difference
+governs how much it can carry. Energy, $\Var(E_L)$ and the overlap between two trained states
+are \emph{state-level}: properties of the wavefunction, unaffected by how the parameters are
+arranged. Quantities defined on a single component (the backflow's rank, its displacement magnitude, a per-component $d_{\mathrm{eff}}$) are not, because the correlator and the
+backflow are substitutes and the division of correlation between them is a nearly flat,
+path-dependent direction of the loss. They record the route the training took as much as the
+state it reached.
+
+That is not a hypothetical worry. An artefactual rank collapse appeared earlier in this
+project under joint from-scratch training, and it needs separating from the one reported
+below, since they are the same observable. The artefact affected \emph{both} architectures,
+moved with the seed, and carried no energy penalty. The collapse reported here appears under
+the staged protocol used throughout the chapter, affects only the conventional backflow, is
+seed-robust, and comes with half a percent of energy. It is the energy that makes it a
+finding rather than a diagnostic curiosity.
+
+The energy gap has a sharp structural signature. Let the \emph{backflow rank} be the
+participation ratio of the displacement field $\Delta\mathbf{x}$ (how many independent
+directions the backflow moves electrons along). The field lives in $2N$ dimensions---$12$,
+$24$ and $40$ at $N=6,12,20$---and the zero-mean projection of Eq.~\eqref{eq:bf-com} removes
+two of them.
+
+The two columns of Table~\ref{tab:bf_rank} sit under different ceilings, because the
+diagnostic is evaluated on each network's returned field and the two apply the zero-mean
+projection at different points (\S\ref{sec:bf-init}): $2N-2$ for the copresheaf network,
+$2N$ for the conventional one. Compare the collapse, not the level. Toward Wigner the \emph{conventional} raw field undergoes a
+spectral collapse to rank~$1$, while the CTNN backflow stays near the ceiling
+(Table~\ref{tab:bf_rank}). The endpoint is the same at every size---rank $1$, from ceilings
+of $12$, $24$ and $40$ at $N=6$, $12$ and $20$---so what grows with $N$ is the height of the
+fall, not the sharpness of it. At $N=6$ and $N=12$ both seeds return exactly $1.00$; the
+$N=20$ entry comes from a separate re-run of that cell and is single-sourced (see the
+table note). The tangent dimension tells the same story
+from the other side: toward Wigner $d_{\mathrm{eff}}$ grows for CTNN ($\sim\!4\!\to\!10$)
+and collapses for the conventional backflow ($\sim\!6\!\to\!1$). The collapse to \emph{exactly} rank~1 is seed-robust where two seeds
+exist ($N=6$ and $N=12$). Rank is not the discriminator above the
+crystal: at $\omega\ge0.1$ the conventional field is nominally the higher-rank of the two
+(Table~\ref{tab:bf_rank}), though that comparison is confounded by the differing ceilings
+noted above, and the two architectures are then also within $0.2\%$ of each other in energy.
+It is the collapse, not the level, that carries the finding.
+
+\paragraph{Capacity is the obvious alternative reading.} The conventional network is a third
+the size of the copresheaf one, so it may simply be running out of parameters at weak
+confinement. Its own $\omega$-dependence argues against that. Capacity does not vary with
+$\omega$, yet the same $51$k network on the same protocol holds a displacement rank of
+$10.4$--$10.8$ at $N{=}6$, $21.7$--$22.3$ at $N{=}12$ and $33.7$--$38.7$ at $N{=}20$ for
+every $\omega\ge0.1$---within a unit or two of its own ceiling---and then falls to exactly
+$1.00$ below it. A network too small throughout the grid would not behave that way. What this
+does not exclude is a regime-dependent limitation, since the target also becomes harder at
+weak confinement; without a widened conventional backflow that confound stands.
+
+This argument does not remove the capacity confound in Table~\ref{tab:bf_energies}. That gap
+is a between-network comparison at unequal size, and nothing in our data separates
+architecture from the extra $131$k parameters. It is reported as what the two production ans\"atze achieve---these being
+the models that produced the energies of Chapter~\ref{ch:results}---and not as an
+architecture ablation.
+
+\begin{table}[htbp]\centering
+\caption[Backflow displacement rank (participation ratio)]{Backflow displacement rank
+(participation ratio), seed-averaged, evaluated on the field as each network returns it.
+The ceilings differ by construction: $2N-2$ ($10/22/38$) for the copresheaf network, which
+projects out the centre of mass inside its forward pass, and $2N$ ($12/24/40$) for the
+conventional one, which does not, so the columns are comparable in their collapse and not in
+their level. The two networks are also not capacity-matched, $51$k against $182$k
+(\S\ref{sec:hyperparameters}). Provenance: all entries
+are seed means over two seeds from the scaling sweep, except the $N=20$, $\omega=0.01$
+column, whose cells exhausted GPU memory in that sweep and were re-run separately; the
+per-run rank artefacts of that re-run were not retained, so unlike every other entry it
+cannot be regenerated from the saved outputs.}
+\label{tab:bf_rank}
+\begin{tabular}{l|cc|cc|cc}
+\hline
+ & \multicolumn{2}{c|}{$N=6$} & \multicolumn{2}{c|}{$N=12$} & \multicolumn{2}{c}{$N=20$}\\
+$\omega$ & CTNN & conv & CTNN & conv & CTNN & conv \\
+\hline
+1.0  & $8.8$ & $10.4$ & $20.8$ & $22.2$ & $36.9$ & $35.4$ \\
+0.1  & $7.7$ & $10.4$ & $18.2$ & $21.7$ & $33.8$ & $37.6$ \\
+0.01 & $9.8$ & $\mathbf{1.0}$ & $20.8$ & $\mathbf{1.0}$ & $35.2$ & $\mathbf{1.0}$ \\
+\hline
+\end{tabular}
+\end{table}
+
+\paragraph{Pricing each component by deletion.} We price each component by ablation on a \emph{common
+probe}: configurations are drawn once from the full model's $|\Psi|^2$ and every arm is
+re-evaluated on them, so the trap and Coulomb terms are held fixed by construction and each
+figure below is the change in the kinetic term at fixed measure---the instantaneous cost of
+removing a component, not the energy of a re-relaxed state. Two seed-stable facts emerge.
+(i) The \textbf{relational work migrates from the nodes to the amplitude} as the trap
+weakens. Deleting the backflow costs $+5.6\%$ at $\omega=1$ and $+1.4\%$ at $\omega=0.1$,
+but only $+0.013$--$0.017\%$ at $\omega=0.01$ (three seeds), while deleting the Jastrow
+messages runs the other way: $+3.9\%$ at $\omega=1$ rising to $+9$--$15\%$ at
+$\omega=0.01$. At the crystal the backflow is very nearly inert---with the Jastrow messages
+already removed, deleting the displacement as well changes the energy by under $0.01\%$.
+``Message passing buys kinetic energy through the nodes'' is a high-$\omega$ statement only.
+(ii) \textbf{Within the backflow, the transport maps \emph{are} the displacement}: zeroing
+the inter-particle transport maps ($\rho_{v\to e},\rho_{e\to v}$) perturbs
+$\Delta\mathbf{x}$ by as much as deleting it outright---the mean
+$|\Delta\mathbf{x}_{\mathrm{abl}}-\Delta\mathbf{x}|$ is comparable to the mean
+$|\Delta\mathbf{x}|$ at every $(N,\omega)$---so what displacement the network produces comes from the messages, not from the per-particle path. Both architectures condition each particle on the
+relative coordinates $\mathbf r_{ij}$, so neither is blind to inter-particle structure;
+the difference is that the conventional backflow uses a single round of pairwise
+messages aggregated per particle, whereas the CTNN maintains and transports explicit
+edge state across the graph. Empirically the single-round backflow does not
+\emph{sustain} a full-rank relative displacement at the crystal---it collapses to a
+single collective displacement mode (rank~1)---while the CTNN's copresheaf transport holds the full-rank
+response, and the ablation shows that this transport carries essentially the entire
+effect.
+
+\begin{figure}[htbp]\centering
+  \includegraphics[width=0.72\textwidth]{message_ablation.png}
+  \caption[Fixed-measure ablation cost of each component]{The \emph{fixed-measure
+  instantaneous ablation cost} of each component (trained networks, $N{=}6$). Configurations
+  are drawn once from the full model's $|\Psi|^2$ and every arm is re-evaluated on them, so
+  the trap and Coulomb terms are identical across arms by construction and the plotted ratio
+  $\Delta E_{\rm probe}/E_{\rm full}$ is the instantaneous change in the kinetic term when a
+  component is switched off. It is \emph{not} the energy of a network retrained without that component, which would be
+  smaller, since nothing is allowed to re-relax. Removing the backflow (cyan) costs
+  ${\sim}6\%$ at $\omega{=}1$ and under $0.02\%$ at $\omega{=}0.01$; removing the Jastrow
+  messages (dark red) grows from $3.9\%$ to $11.4\%$ over the same range. The curves cross
+  near $\omega\approx0.4$. Removing all message passing (blue) tracks the Jastrow-message curve
+  and meets it at $\omega{=}0.01$: once the correlator's messages are gone, deleting the
+  displacement as well costs nothing measurable. The relational work
+  migrates from the nodes to the amplitude: at the crystal it is the correlator's messages,
+  not the backflow, that carry it. This is a statement about how \emph{this} trained model
+  divided the correlation between two substitutable components, and so is conditional on the
+  staged training protocol rather than gauge-invariant (\S\ref{sec:synthesis}); the ablation
+  costs themselves are reproducible at fixed protocol.}
+  \label{fig:q1b-ablation}
+\end{figure}
+
+\subsection{A common relational bottleneck}
+The two effects have a candidate common cause in how relational information is
+\emph{routed}, and the correlator-swap experiment below is what raises that from a
+resemblance to a supported reading. The baselines are not blind to inter-particle structure: the separable correlator pools independently encoded pairs, and the conventional backflow aggregates a single round of pairwise messages. But neither maintains a persistent, transported edge representation:
+each pairwise term is computed and discarded. The copresheaf CTNN does maintain one, and
+moves it back and forth between nodes and edges through learned transport maps
+($\rho_{v\to e},\rho_{e\to v}$); the message-passing correlator iterates this exchange over
+a V-cycle, while the backflow applies a single such copresheaf round. Where a compact
+representation exists this \emph{compresses} the correlation onto fewer tangent directions
+(Jastrow: smaller $d_{\mathrm{eff}}$); where the physics demands a genuinely collective,
+full-rank response the single-round baseline instead collapses to a single collective
+displacement mode (backflow: rank~1), which the copresheaf transport avoids. Both effects are visible only
+in the tangent-kernel geometry, not in the total energy, until weak confinement makes
+the geometric deficit an energetic one.
+
+Two components failing at similar confinements is a resemblance; what makes it evidence is
+that moving one of them moves the other. To test this we held the backflow architecture fixed, the conventional network in both arms, swapped only the correlator, retrained each
+arm to convergence, and tracked both quantities down the $\omega$-sweep.
+
+The backflow's failure boundary moves with the correlator. With a separable correlator the
+two give way together near $\omega\approx0.05$: correlation-hole capture falls from $0.68$
+to $0.07$ and the displacement rank from ${\sim}10$ to $1$ across the same step. With a
+message-passing correlator both hold half a decade further, to $\omega\approx0.01$
+(Fig.~\ref{fig:q1-unify}).
+
+Each arm is a separately trained network, not one network reconfigured, so ``held
+fixed'' means the same architecture and recipe, never the same weights. Within that,
+intervening on one component relocates the other's failure, which is what a shared cause
+predicts and a coincidence does not. The correlator's grip on the physical correlation modes
+and the backflow's ability to sustain a full-rank displacement look like one capability seen
+from two sides: when the amplitude model can no longer resolve the correlation hole, the
+nodal deformation can no longer stay high-rank, and a better correlator postpones both.
+
+\begin{figure}[htbp]\centering
+  \includegraphics[width=\textwidth]{q1_unification.png}
+  \caption[Correlator physicality and backflow rank collapse together]{Correlator physicality and backflow rank collapse together ($N=6$; the backflow
+  architecture is held fixed, only the correlator changes). For each correlator, the
+  correlation-hole capture (left axis) and the backflow displacement rank (right axis) give way
+  at the same $\omega$: $\omega\!\approx\!0.05$ for the DeepSet, $\omega\!\approx\!0.01$ for the
+  CTNN. A correlator that keeps its physical structure lets the backflow keep its rank.}
+  \label{fig:q1-unify}
+\end{figure}
+
+% =====================================================================
+\subsection{What the trained representation looks like}
+\label{sec:kernel-repr}
+
+One descriptive result belongs beside these controlled comparisons. Examining a single
+high-quality trained solution shows the correlator occupying a feature space of one to three
+effective dimensions across the entire grid and never expanding: at $\omega=10^{-3}$, where
+the real-space density has developed rings and discrete occupancies, the latent rank is no
+larger than at $\omega=1$. What changes across the crossover is which branch the leading axis
+draws on, not how many axes there are. The displacement field is the opposite kind of object,
+spanning nearly all the spatial directions available to it and leaving the correlator's
+feature geometry almost unperturbed.
+
+These are component-level measurements on one run. They are gauge-like---the correlator and
+backflow are partial substitutes, so the division of labour between them records the training
+route as much as the state---and no architectural conclusion above depends on them. They are
+recorded because a low effective covariance rank is not what one would predict for a
+state whose real-space structure is this elaborate, and because the reorganisation happens
+near $\omega\approx0.1$, the same confinement at which the energy partition crosses over
+(\S\ref{sec:wigner-energy}) and the ablation costs of Fig.~\ref{fig:q1b-ablation} exchange
+order. Whether that coincidence reflects one mechanism or three we cannot say from a single
+run. Appendix~\ref{app:representation} gives the full analysis.
+
+\medskip
+\noindent Message passing therefore supplies a relational channel whose effect is geometric
+before it is energetic. In the correlator it shows as a tangent space that is smaller at
+strong confinement and better accounted for by a compact operator dictionary throughout, with
+a local-energy variance lower at every confinement by factors of $1.2$ to $3.4$. In the
+backflow it shows as a collapse averted, costing half a percent where it is not. The
+correlator swap ties the two together. What none of it establishes is that the two
+architectures reach different \emph{states}: they agree in energy to four figures, and we did
+not measure their overlap here.
+
+\section{Conditioning and the sampling measure}
+\label{sec:kernel-cond}
+\label{sec:kernel-q2}
+
+Two design choices remain, and the tangent geometry settles both at once. One asks what a
+natural-gradient step buys over a diagonal one. The other asks what changes when the loss is
+defined by an analytic proposal instead of by $|\Psi|^2$. They are the same question twice
+over: stochastic reconfiguration inverts the metric $S$, and the sampling measure is what
+builds $S$ in the first place.
+
+\subsection{Natural-gradient preconditioning}
+Stochastic reconfiguration preconditions the gradient by the inverse QGT,
+$\btheta \leftarrow \btheta - \eta\, S^{-1}\nabla_{\btheta} E$; geometrically it \emph{whitens} the tangent
+kernel. At $N=2$ this is exact: the SR step aligns with the imaginary-time direction
+to numerical precision. The question is where whitening changes the outcome.
+
+Fixing the ansatz and varying only the optimiser from a common stage-3 base:
+\textbf{for $|\Psi|^2$-VMC, SR and Adam are indistinguishable}---exact at $N=2$
+(var $\sim\!10^{-9}$), and at $N=6$ the energy gap
+$E_{\mathrm{Adam}}-E_{\mathrm{SR}}$ is $\lesssim0.002$ across $\omega$ and both
+seeds; in the matched pair at $\omega=1$ the two agree to four decimals in relative error.
+\textbf{For weak-form collocation from the same common base, SR is decisive}: there
+$E_{\mathrm{Adam}}-E_{\mathrm{SR}}$ is large and positive (e.g.\ $+2.9$ at
+$N=6,\omega=1$), and plain Adam does not converge the objective.
+
+That statement is about a controlled comparison, and it needs reconciling with
+\S\ref{sec:colloc-method}, where Adam is the production default and the entire $30$-run
+reliability campaign uses it successfully. Both are true, and the difference between them is
+the rest of the pipeline. Stripped to a bare objective and a fixed proposal, the collocation
+gradient is badly enough behaved that a diagonal step stalls and preconditioning rescues it.
+The production recipe never runs in that condition: adaptive proposal refitting, $16\times$
+oversampling, reward normalisation, instability rollback and cascade warm-starting between
+confinements each attack the gradient's conditioning at its source, and once they are in
+place a diagonal step suffices. The two findings are therefore complementary---SR
+substitutes for sampling control, and sampling control substitutes for SR---with one
+asymmetry that decides the production choice: below $\omega\simeq0.01$ the sampling that
+builds $S$ collapses, so the substitution stops working in one direction only
+(\S\ref{sec:colloc-negatives}). Adam is the default because it degrades gracefully where SR
+does not.
+
+A large condition number alone does not explain the difference. Table~\ref{tab:kappa}
+reports
+$\kappa(S)=\lambda_{\max}/\lambda_{\min}$ measured on the trained states under $|\Psi|^2$
+sampling, and it is enormous, $10^{7}$ to $10^{10}$, for \emph{both} architectures and at
+every capacity in the ladder, including precisely the models on which Adam and SR agree to
+four decimals. Whatever makes SR unnecessary under $|\Psi|^2$ sampling, it is not that the
+metric is well conditioned.
+
+\begin{table}[htbp]\centering
+\caption[Condition number of the empirical geometric tensor]{Condition number of the empirical quantum geometric tensor at $N{=}6$, $\omega=1$,
+measured on each trained state's own $|\Psi|^2$ samples at fixed batch $B=768$. Because
+$B<P$, $\lambda_{\min}$ is the smallest sample-supported eigenvalue and $\kappa$ is a
+property of the metric the optimiser actually sees (\S\ref{sec:analysis-kernel}); the values
+are comparable to one another but not across batch sizes. Adam and SR reach the same energy
+on every row of this table.}
+\label{tab:kappa}
+\begin{tabular}{llcc}
+\hline
+architecture & params & $\kappa(S)$ & $d_{\mathrm{eff}}$ \\
+\hline
+CTNN (seed 1)      & $79.8$k & $6.9\times10^{7}$  & $1.46$ \\
+CTNN (seed 2)      & $79.8$k & $5.2\times10^{7}$  & $1.39$ \\
+DeepSet (small)    & $20.2$k & $3.2\times10^{9}$  & $3.56$ \\
+DeepSet (medium)   & $47.7$k & $3.4\times10^{7}$  & $4.35$ \\
+DeepSet (matched)  & $89.4$k & $3.2\times10^{10}$ & $3.61$ \\
+DeepSet (large)    & $164$k  & $1.4\times10^{7}$  & $4.76$ \\
+\hline
+\end{tabular}
+\end{table}
+
+\textbf{SR matters when the tangent metric is ill-conditioned and still estimable}, and the
+second half of that sentence does the work. Anisotropy is present under $|\Psi|^2$ sampling,
+where we measured it. We did not measure $\kappa$ under the collocation measure at matched
+batch size, so the table supports only the negative half of the argument: conditioning does
+not distinguish the regime where SR is unnecessary. What separates the two regimes, on the evidence we
+do have, is whether a batch can resolve the metric. Under $|\Psi|^2$
+the samples are drawn from the very measure that defines $S$, so the directions carrying
+Fisher weight are also the directions the batch populates, and Adam's diagonal step already
+moves along them. Under a fixed covering proposal the estimator of $S$ is built from
+reweighted points that increasingly miss the target, and preconditioning supplies structure
+the diagonal cannot. We have not measured $\kappa$ under the collocation measure at matched
+batch size, so this is an argument from the estimator, not a second condition-number comparison; what the table establishes is the negative half---that raw conditioning does not
+distinguish the two regimes.
+
+``More ill-conditioned $\Rightarrow$ more useful SR'' cannot hold without bound, since
+inverting $S$ requires $S$ itself to be \emph{reliably estimated}. SR helps when the tangent
+metric is anisotropic and its empirical estimate is trustworthy. Once the sampling that builds
+$S$ collapses, as the importance weights do deep in the Wigner regime, the empirical $S$
+becomes noisy and rank-deficient, and preconditioning by its inverse amplifies the noise
+instead of the signal. This is exactly the behaviour seen at ultra-weak confinement, where CG-SR on the
+collocation objective becomes unstable (\S\ref{sec:colloc-negatives}). SR pays off in the
+window where the metric is both ill-conditioned and estimable, and fails once estimation
+itself breaks down.
+
+The VMC equivalence of Adam and SR is established here at $N=2$ and $N=6$, and we have not
+verified that it survives to $N=12$ and $N=20$. The mechanism we propose---that
+$|\Psi|^2$ sampling makes the metric \emph{estimable} on the batch, whatever its
+conditioning, and so lets Adam's diagonal preconditioning suffice---predicts that it should,
+since the argument turns on the sampling measure and not on dimension. But it is a
+prediction there, not a measurement, and testing it is the obvious extension. The same
+applies to the reverse reading of Table~\ref{tab:kappa}: $\kappa$ is measured at one $N$ and
+one $\omega$, and we do not know how it moves with either.
+
+% =====================================================================
+\subsection{Consequences of the sampling measure}
+
+Between $|\Psi|^2$-sampled VMC and importance-sampled collocation the wavefunction family
+is identical; only the measure that defines the loss changes. That change has three
+consequences, and underneath them one cause.
+\paragraph{Target sampling aligns the estimator with the metric; a covering proposal does
+not.} Sampling from $|\Psi|^2$ makes the estimators of $S$ and of the gradient share the
+measure that defines them, so the directions carrying Fisher weight are also the directions
+the batch populates. That is an alignment between estimator and objective, not
+preconditioning in the sense of applying $S^{-1}$. A fixed covering proposal instead drives
+a monotone \emph{ESS collapse} as $N$ and $1/\omega$ grow: at $N=6,\omega=0.01$ the
+effective sample size falls to $0.11\%$ of the batch---about $5$ of the $4096$ retained
+points---and the gradient estimator is then degenerate. That is a hard limit, not
+undertraining. (Two ESS normalisations appear in this chapter, differing by the oversampling
+factor; each figure states which.)
+
+\S\ref{sec:colloc-reliability} below nonetheless reports usable collocation energies at the
+same $(N,\omega)$---$+0.24$--$0.29\%$ across three seeds, Table~\ref{tab:reliability}---and
+the two situations differ in the sampler and in the quantity being described. The sampler
+first: the collapse measured above is for the \emph{static} origin-centred
+mixture, while the campaign's robust recipe refits its proposal every $30$ epochs and
+oversamples $16\times$. The campaign's \emph{baseline} rows, which keep the static
+proposal, are the ones that blow up ($+3.9$ to $+7.2\%$ at $\omega=0.001$). Second, and
+more interesting, the two statements are not about the same quantity. The energy stays within a third of a percent while the state overlap ceases to be
+resolvable---which is the sharpest illustration in this thesis of why energy alone does not
+certify a state. We stop short of saying the overlap \emph{is} zero: $\mathcal{S}^2$ is a
+ratio estimator built from the same degenerate weights, so at this ESS it reports \emph{unresolved} and not orthogonal.
+
+\begin{figure}[htbp]\centering
+  \includegraphics[width=0.62\textwidth]{ess_collapse.png}
+  \caption[ESS collapse of the naive collocation proposal]{The naive collocation proposal collapses in the Wigner regime ($N{=}6$). The
+  effective sample size (as a percentage of the batch) falls by more than an order of
+  magnitude from $\omega{=}1$ to $\omega{=}0.01$, where it reaches $\sim\!0.1\%$---about five
+  usable points in a batch of $4096$. This is a property of the sampling measure, not of
+  optimisation, and it is what the physics-informed ring proposal
+  (\S\ref{sec:kernel-q3-frontier}) is designed to repair.}
+  \label{fig:q3-ess}
+\end{figure}
+
+\paragraph{State agreement degrades with proposal overlap.} We test whether the two
+paradigms reach the same \emph{state} (not merely the same energy) via the symmetric
+overlap
+$\mathcal{S}^2=\langle\Psi_B/\Psi_A\rangle_{|\Psi_A|^2}
+\langle\Psi_A/\Psi_B\rangle_{|\Psi_B|^2}$. At $N=2$ they are identical
+($\mathcal{S}^2>0.997$ for every $\omega$, both optimisers, both seeds): the paradigm
+is efficiency-only, collocation paying $\sim\!5\times$ the variance for the same
+wavefunction. At $N=6$ they \emph{diverge}: under Adam $\mathcal{S}^2$ falls from $0.85$ at $\omega=1$ to
+$0.77$ at $\omega=0.1$ (both seeds), tracking the ESS collapse, and at $\omega=0.01$ the
+estimator returns values near zero but is no longer resolved---at an ESS of about five
+points it is a ratio of two degenerate importance-weighted averages, and we record it as
+\emph{unresolved} rather than as a measured orthogonality. SR partially rescues the
+$\omega=0.1$ value ($\mathcal{S}^2\!\approx\!0.95$) but does not close the gap. Weak-form collocation thus has a \textbf{domain of validity}---equivalent to
+VMC when the importance sampling is healthy, degrading as correlation strengthens.
+The two halves of this section meet here: the paradigm that needs SR is the one that
+breaks down at scale. An adaptive proposal that tracks $|\Psi|^2$ is the natural remedy, pursued in
+\S\ref{sec:kernel-q3-frontier}.
+
+\paragraph{Why the collocation energy readout is biased.} For an exact eigenstate the
+local energy $E_L=\hat H\Psi/\Psi$ is constant over configuration space, so
+$\Var(E_L)\to0$ as the ansatz approaches the ground state---the zero-variance principle,
+and the reason $\Var(E_L)$ is a sharp quality measure. That cancellation is a property of
+the \emph{full} local energy, in which the kinetic (Laplacian) and potential terms combine
+to a constant; it is not a property of the Laplacian term alone. The collocation objective
+does \emph{not} discard the Laplacian: it is a score-function (REINFORCE) estimator that
+\emph{forms} the full $E_L$ as a detached reward and differentiates only $\log|\Psi|$
+(\S\ref{sec:colloc-method}). What it gives up is the \emph{measure}, and three things then spoil the readout, in
+increasing order of severity. The estimator is self-normalised, since $|\Psi_\theta|^2$ is
+unnormalised, so it carries an $\mathcal O(1/n)$ finite-sample bias that vanishes with sample
+size. The tail controls deliberately change the target: tempering $w\to w^\alpha$ and
+clipping the log-weights trade bias for variance on purpose, so the estimated quantity is no
+longer $\langle E_L\rangle_{|\Psi|^2}$. And, dominant in the regimes that matter,
+proposal--target mismatch inflates the variance beyond any affordable sample size
+(\S\ref{sec:colloc-reliability}). Importance sampling is not biased merely for being
+importance sampling; it is the last two that make the readout unusable as a stopping rule.
+The reliable criteria are $\Var(E_L)$ and the state overlap, both on $|\Psi|^2$ samples.
+
+The value of a natural-gradient step is therefore not predicted by the conditioning of the
+metric, which is large under $|\Psi|^2$ sampling on exactly the models where SR buys nothing.
+What predicts it is whether the batch can resolve the metric it inverts. The negative half of
+that is directly measured; the positive half---that collocation occupies an anisotropic but
+still estimable middle regime---is inferred, since $\kappa$ was never measured under the
+collocation measure at matched batch size.
+
+\section{Training without a Markov chain}
+\label{sec:kernel-mcmcfree}
+\label{sec:collocation}
+
+The conditioning story has a practical edge. If the sampling measure is what makes the
+metric estimable, then choosing that measure is a design decision, not a fact of nature---and
+the obvious thing to try is a measure with no Markov chain in it at all.
+
+\paragraph{Two walls.} What follows is easier to hold if the destination is given first.
+The Markov-chain-free route runs into two limits of entirely different kinds, and almost
+every result in \S\ref{sec:kernel-mcmcfree}--\S\ref{sec:kernel-q3-frontier} is located
+against one or the other.
+
+\emph{The first wall is statistical.} A fixed analytic proposal loses overlap with
+$|\Psi_\theta|^2$ as the trap opens; the importance weights grow heavy-tailed; the gradient
+estimator comes to be dominated by a handful of draws; the empirical metric becomes
+unreliable and preconditioning by it does harm. Everything on that chain is a sampling
+problem, and a better proposal moves the wall---from $\omega\approx0.01$ with an
+origin-centred mixture to $\omega=0.0035$ with one built out of the measured Wigner
+geometry.
+
+\emph{The second wall is not.} Below $\omega=0.0035$ a converged state fails to survive
+transfer to a weaker trap even when the sampler is initialised directly on the correct
+shell. The Wigner peak exists only through a near-cancellation between an exponentially
+suppressed determinant and a Jastrow that amplifies it back, and a $23\%$ change in $\omega$
+tips that balance. No change of proposal repairs it, because the proposal is not what fails.
+
+\noindent \S\ref{sec:kernel-mcmcfree} establishes the first wall and the mechanism behind
+it; \S\ref{sec:kernel-q3-frontier} moves it and then runs into the second.
+
+A Markov chain is what makes neural variational Monte Carlo sequential. Chains must
+equilibrate, successive samples are correlated, and mixing times grow with particle number
+and with correlation strength. They grow fastest, in other words, exactly where the physics
+gets interesting.
+
+Draw the configurations instead from a fixed analytic proposal and reweight them, and the
+whole gradient step becomes embarrassingly parallel. The question is what that costs.
+
+Two ways of posing the problem behave very differently, and the difference decides
+everything downstream. The \emph{strong form} asks the wavefunction to satisfy the local
+Schr\"odinger equation pointwise, minimising the variance of $E_L$ and differentiating
+through the Laplacian to do it. The \emph{weak form} uses a score-function (REINFORCE)
+gradient in which the Laplacian enters only as a reward and is never differentiated.
+Appendix~\ref{app:catch22} shows that the strong form meets a structural obstruction the
+moment it is asked to train a backflow: the learning signal lives at the nodal surface,
+where $E_L$ diverges for any imperfect node, and no combination of sampling, loss or
+preconditioning breaks an accuracy floor near $0.3\%$---a floor set by the Jastrow alone,
+with the backflow contributing almost nothing. That is a property of the objective, not of
+the idea. Everything below uses the weak form.
+
+On the same Slater--Jastrow--backflow ansatz, and with no
+Markov chain in any gradient, the weak form recovers the variational energy to statistical
+consistency with DMC at strong confinement and to a few tenths of a percent of our gold
+standard well into the correlated regime for $N\in\{6,12\}$
+(Table~\ref{tab:collocation}). The energies are collected here, where the method that
+produced them is explained, rather than beside the SR--VMC energies of
+\S\ref{sec:energy-overview}: without the failure mechanism of
+\S\ref{sec:colloc-reliability} in hand, the pattern of where they hold and where they give
+way is not interpretable.
+
+\begin{table}[htbp]
+  \centering
+  \caption[Energies from Markov-chain-free collocation training]{Ground-state energies from
+  Markov-chain-free collocation training, all rows using the backflow+Jastrow ansatz. Each
+  run selects its best checkpoint using a VMC probe (${\geq}20$k samples) and reports a
+  final IS evaluation; the latter is the table's scoring estimator. For $N{=}6$ the
+  headline number is the \emph{reliability of that evaluated protocol}, not its luckiest run: the
+  campaign of \S\ref{sec:colloc-reliability} fixes a $1200$-epoch budget and the
+  hyperparameters and varies only the seed, and both the three-seed mean $\pm$ standard
+  deviation and the best of the three are given. The $N{=}2$ rows are single collocation
+  runs, zero-variance extrapolated. The $N{=}12$ rows are marked $^{\dagger}$: no campaign
+  was run at that size, so they are the best of the independent runs and are \emph{not}
+  protocol-controlled---read them as what the method reached, not as what it reaches
+  reliably. The reference column is the external value where one exists and, where none does
+  ($N{=}6$ at $\omega\le0.01$ and $N{=}2$ at $\omega=10^{-3}$; see Table~\ref{tab:energies}),
+  our own converged SR--VMC energy, in which case the deviation measures internal
+  consistency rather than absolute accuracy. Deviations are $100\,(E-E_{\rm ref})/E_{\rm ref}$.}
+  \label{tab:collocation}
+  \begin{tabular}{c c c c c c}
+    \toprule
+    & & & & \multicolumn{2}{c}{relative deviation (\%)} \\
+    \cmidrule(lr){5-6}
+    $N$ & $\omega$ & Reference & Best energy & best & mean $\pm$ s.d. \\
+    \midrule
+    2 & 1.0   & $3.00000$      & $3.00035$      & $+0.012$ & --- \\
+      & 0.5   & $1.65977(1)$   & $1.66014$      & $+0.022$ & --- \\
+      & 0.1   & $0.44079(1)$   & $0.44077$      & $-0.005$ & --- \\
+      & 0.01  & $0.073839(2)$  & $0.073840$     & $+0.001$ & --- \\
+      & 0.001 & $0.013778$     & $0.013799$     & $+0.152$ & --- \\
+    \midrule
+    6 & 1.0   & $20.15932(8)$  & $20.1620(56)$  & $+0.013$ & $+0.050\pm0.049$ \\
+      & 0.5   & $11.78484(6)$  & $11.7850(48)$  & $+0.001$ & $+0.054\pm0.055$ \\
+      & 0.1   & $3.55385(5)$   & $3.5632(7)$    & $+0.263$ & $+0.286\pm0.034$ \\
+      & 0.01  & $0.69036$      & $0.69200(1)$   & $+0.238$ & $+0.269\pm0.028$ \\
+      & 0.001 & $0.140832$     & $0.14118(1)$   & $+0.247$ & $+0.281\pm0.044$ \\
+    \midrule
+    12$^{\dagger}$ & 1.0 & $65.7001(1)$   & $65.706(4)$   & $+0.009$ & --- \\
+       & 0.5   & $39.1596(1)$   & $39.169(4)$   & $+0.024$ & --- \\
+       & 0.1   & $12.26984(8)$  & $12.2824(6)$  & $+0.102$ & --- \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\subsection{The weak-form objective}
+\label{sec:colloc-method}
+The collocation training used here is exactly the Markov-chain-free pipeline specified in the
+Methods: a weak-form (REINFORCE~\cite{Williams1992-REINFORCE}) objective in which the local energy
+enters as a detached reward (\S\ref{sec:method-collocation},
+Eq.~\eqref{eq:reinforce-method}), an analytic Gaussian-mixture proposal reweighted to
+$|\Psi_\theta|^2$ with ESS / Pareto-$\hat k$ monitoring~\cite{Vehtari2024} and tail
+controls (\S\ref{subsec:colloc-proposal}), and---in the Wigner
+regime---the physics-informed ring proposal with cascade warm-starting
+(\S\ref{subsec:colloc-wigner}). Two methodological findings shape what follows. First, among
+the optimisers (\S\ref{sec:sr-stage}), \textbf{Adam} was the robust
+default across all regimes, whereas \textbf{CG-SR} converged faster at $\omega\!\ge\!0.1$ but
+diverged for $\omega\!\le\!0.01$, where the empirical metric becomes statistically unresolved.
+Second, \textbf{cascade warm-starting}, initialising each confinement from the converged checkpoint of a stronger one, was decisive for reaching the deep-Wigner regime, exploiting
+the transfer of correlation structure across $\omega$.
+
+
+\label{sec:colloc-architectures}
+Three ansatz families were tried within this framework, all built on the same
+Slater--Jastrow core and differing only in what dresses it; their definitions and sizes are
+in \S\ref{sec:hyperparameters}. The \textbf{backflow+Jastrow} family produced the best
+results at $N{=}6$ and $N{=}12$ and carries every number below. The
+\textbf{Jastrow-only} family was the fastest and most robust to train, served as the
+initialiser for the backflow runs, and becomes the better choice at $N{=}20$ for the memory
+reason of \S\ref{sec:colloc-arch-discussion}. The \textbf{neural
+Pfaffian}~\cite{GaoGuennemann2024-NeuralPfaffian}, which replaces the determinant with a
+more general antisymmetric form and in principle offers richer nodal topology, reached only
+$+0.43$--$0.50\%$ at $N{=}6$, $\omega{=}1$ against $+0.013\%$ for backflow+Jastrow: its
+extra expressivity was not exploitable under this sampling regime, because the larger
+parameter space amplifies importance-sampling gradient noise faster than the richer nodes
+repay.
+
+\paragraph{Why the weak form is stable where the strong form is not.}
+\label{sec:colloc-why-reinforce}
+
+The catch-22 analysis (Appendix~\ref{app:catch22}) identified a
+fundamental obstacle for direct PDE-residual training of the
+many-body Schr\"odinger equation: the backflow learning signal is
+concentrated near nodes and coalescence points where the local energy
+$E_L$ diverges, but these are precisely the configurations where
+second-derivative pathways are ill-conditioned.
+Backpropagating through the Laplacian in such regions produces
+pathological gradients that destabilise training.
+
+The REINFORCE formulation resolves this by construction.
+The Laplacian enters only through the \emph{reward} (the local energy
+in Eq.~\eqref{eq:local-energy}), and gradients act exclusively on the score
+function $\nabla_\theta \log|\Psi|$.
+The stability is subtler than the score simply being bounded. For a
+\emph{parameter-dependent} (backflow) node the score itself can diverge---
+$\nabla_\theta\log|\Psi|\supset(\nabla_\theta D)/D$ grows like $1/d_\theta$ as the learned
+determinant $D\!\to\!0$ near its node. What matters is that this divergence is
+\emph{integrable} under the $|\Psi|^2$ sampling measure, which weights it by
+$|\Psi|^2\sim d_\theta^2$ (and the near-node points are further suppressed by the
+importance screening). REINFORCE avoids the \emph{stronger}, non-integrable divergence
+of the strong-form residual, in which the Laplacian term $\nabla^2 D/D$ enters the
+gradient directly (Appendix~\ref{app:catch22}). Keeping the Laplacian in the
+\emph{reward} but out of the \emph{gradient flow} is what lets the collocation pipeline
+train backflow and Jastrow parameters stably in regimes where direct residual
+minimisation fails.
+
+The superiority of pure REINFORCE ($\beta{=}0$) over the hybrid
+objective ($\beta{>}0$) has a related explanation.
+The direct weak-form term $\tilde{E} = \tfrac{1}{2}\|\nabla\log\Psi\|^2 + V$
+is cheaper to evaluate (no Laplacian needed). Averaged under the current
+$|\Psi|^2$ measure, it equals the variational energy by integration by parts.
+The implemented direct path, however, differentiates $\tilde E(R)$ at retained
+samples without the score contribution from the changing sampling measure; $V(R)$
+then has no explicit parameter derivative and the update behaves as a kinetic-only
+pathwise gradient.
+At nonzero~$\beta$, the resulting gradient conflict between the two
+objectives manifests as oscillatory behaviour in the energy, with the
+REINFORCE term pulling toward the variational minimum and the direct
+term pulling toward a kinetic-energy minimum that is generally
+distinct.
+
+\subsection{Collocation performance}
+\label{sec:colloc-results}
+
+\paragraph{$N{=}6$: near-reference accuracy across all~$\omega$.}
+For six electrons, collocation training reaches DMC-level accuracy
+where DMC exists: at $\omega\ge 0.5$ the errors are $\lesssim 0.01\%$, which is
+statistically consistent with the reference once the collocation uncertainty is
+included---though it is several times the DMC error bar taken alone, so ``consistent'' here
+is a statement about the combined uncertainty and not about matching DMC's own precision. At the most extreme confinements,
+$\omega\in\{0.01,0.001\}$, where the electrons are separated by
+${\sim}30$--$120\,a_0^\ast$ (a few oscillator lengths) and no DMC reference is available,
+the energies stay within $0.1$--$0.25\%$ of our converged variational gold
+standard; this is agreement between two independent training paradigms on
+the same ansatz, not a certificate of absolute accuracy. The best campaign result at
+$\omega{=}1.0$ is $E{=}20.1620\pm0.0056$ ($+0.013\%$), which lies within $0.5\sigma$ of the
+reference on the combined uncertainty---dominated by ours, since the deviation is some tens
+of times the DMC error bar of $8\times10^{-5}$.
+
+These results are achieved without any Markov chain in the training gradients.
+MCMC enters only outside the gradient loop: a small Metropolis probe periodically selects the
+best checkpoint, and the final heavy evaluation certifies the energy.
+The training itself uses $4096$ importance-resampled collocation
+points per epoch with an oversampling factor of~$8$, requiring
+${\sim}32\text{k}$ proposal evaluations per gradient step. That is ten times the
+${\sim}3{\times}10^3$ samples per step used by the SR route, but each is a single
+independent amplitude evaluation rather than a step of a correlated chain that must
+first equilibrate. The collocation batch is also embarrassingly parallel where the chain
+is not, though we did not benchmark the two pipelines against a common wall-clock budget.
+
+Staged continuation is what makes those budgets pay, and an exploratory run at
+$\omega{=}1.0$ shows the effect cleanly: an initial BF+Jastrow joint REINFORCE stage
+(900~epochs, $\text{lr}{=}5{\times}10^{-4}$), a low-LR continuation (750~epochs,
+$\text{lr}{=}3{\times}10^{-4}$) and a hard-focus stage (500~epochs,
+$\text{lr}{=}2{\times}10^{-4}$), each inheriting the previous checkpoint, improve
+monotonically through $+0.08\%$, $+0.05\%$ and $+0.010\%$. That run was hand-tuned and is
+not among the protocol-controlled numbers of Table~\ref{tab:collocation}; we report it
+because it is the observation that put cascade warm-starting into the campaign's robust
+recipe (Table~\ref{tab:colloc-variants}).
+
+\paragraph{$N{=}12$: sub-$0.03\%$ at strong confinement.}
+For twelve electrons, the BF+Jastrow collocation results track DMC
+closely at $\omega\ge 0.5$, with best-run errors of $+0.009\%$ and
+$+0.024\%$ at $\omega{=}1.0$ and $0.5$ respectively (Table~\ref{tab:collocation}). No
+reliability campaign was run at this size, so these are the best of the independent runs and
+not protocol-controlled in the way the $N{=}6$ rows are.
+At $\omega{=}0.1$ the error increases to $+0.102\%$, reflecting the
+growing difficulty of importance sampling in 24~dimensions at weak
+confinement.
+The ESS at $\omega{=}0.1$ is typically $5$--$15$ per epoch
+(out of $4096$ kept points), indicating that the Gaussian mixture
+proposal still maintains usable overlap with~$|\Psi|^2$.
+
+Attempts to extend to $\omega\le 0.01$ at $N{=}12$ were
+unsuccessful: both direct starts and cascade warm-starts from
+$\omega{=}0.1$ failed to converge, with the ESS collapsing to~$1$
+and the rollback mechanism rejecting all gradient updates.
+This marks the boundary of the current collocation approach for
+$N{=}12$.
+
+\paragraph{$N{=}20$ exposes the memory--sampling trade-off.}
+Twenty electrons in two dimensions push the collocation pipeline against a hardware wall,
+not a conceptual one. The backflow's edge-feature tensor scales as
+$\mathcal{O}(N^2 h_{\mathrm{bf}})$, which at $N{=}20$ forces the hidden dimension, the
+collocation budget or the oversampling factor down far enough to degrade the gradient---so
+far that a Jastrow-only ansatz, freed of that cost, trains better than the backflow ansatz it
+should in principle beat. Since the limitation is memory and gradient noise, the $N{=}20$
+results and the reversal that exposes them are reported in
+Appendix~\ref{app:postcatch22:frontier}.
+
+\subsection{Ablations and failed variants}
+\label{sec:colloc-negatives}
+
+Most of the method space we explored did not work. The failures are reported here beside
+the successes, because a working configuration tells you only that some set of choices is
+sufficient, whereas a failure chased far enough to name its mechanism tells you which
+choice was load-bearing---and that transfers to systems other than this one. Each attempt
+below was, at the time, an intuitively reasonable idea. Each turned out to violate an
+assumption the method had never been forced to state.
+
+\begin{table}[htbp]\centering
+\caption[Collocation variants tried, and what each one settled]{Collocation variants tried, and what each one settled. Errors are relative to
+the reference of Table~\ref{tab:collocation}. The three marked $\dagger$ are taken up in
+prose below; the rest are recorded for completeness.}
+\label{tab:colloc-variants}
+\small
+\setlength{\tabcolsep}{5pt}
+\renewcommand{\arraystretch}{1.15}
+\begin{tabular}{@{}p{0.24\linewidth} p{0.17\linewidth} p{0.51\linewidth}@{}}
+\toprule
+Attempt & Outcome & Mechanism \\
+\midrule
+Pure REINFORCE ($\beta{=}0$) over the hybrid objective
+  & adopted
+  & The direct path omits the sampling-measure score contribution; at
+    $\beta>0$ it contributes a kinetic-only pathwise gradient that conflicts with REINFORCE,
+    and the two gradients oscillate against each other. \\
+Cascade warm-start from higher $\omega$
+  & essential
+  & Cold starts never converged at $\omega{=}0.01$ for $N\ge6$. Cascading from
+    $\omega{=}0.1$ cut the initial error from ${\sim}30\%$ to ${\sim}5\%$ and made
+    $+0.15\%$ reachable in ${\sim}1000$ epochs. \\
+ESS-adaptive oversampling with instability rollback
+  & essential
+  & Raises the proposal budget when overlap degrades and reverts on energy spikes.
+    Without both, $\omega{=}0.001$ diverged within a few hundred epochs. \\
+CG-SR below $\omega\simeq0.01$ $\dagger$
+  & abandoned
+  & $+4$--$36\%$ against $+0.15$--$0.24\%$ from Adam. Not ill-conditioning but
+    unestimability; see below. \\
+Langevin proposal refinement $\dagger$
+  & abandoned
+  & Worse in every configuration tested ($+153\%$ against $+5.7\%$ at $N{=}20$,
+    $\omega{=}0.1$). The weights are computed against a proposal the samples have
+    stopped following; see below. \\
+Finite-difference residual loss
+  & abandoned
+  & $+0.22\%$ at $N{=}6$, $\omega{=}1$ against $+0.010\%$ from REINFORCE. Sensitive to
+    the step size and to noise in the Laplacian estimate. \\
+Neural Pfaffian ansatz~\cite{GaoGuennemann2024-NeuralPfaffian}
+  & abandoned
+  & $+0.43\%$ at $N{=}6$, $\omega{=}1$, forty times the BF+Jastrow error. The larger
+    parameter space amplifies importance-sampling gradient noise faster than the richer
+    nodal topology repays. \\
+Backflow at $N{=}20$ $\dagger$
+  & abandoned
+  & $+18\%$ against $+1.32\%$ for Jastrow-only. A memory limit rather than a
+    conceptual one; see \S\ref{sec:colloc-arch-discussion}. \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Why natural gradients stop helping.}
+CG-SR gave the fastest convergence and the best final energies at $\omega\ge0.1$, and
+then failed outright below it. The obvious explanation is ill-conditioning: at weak
+confinement the Fisher matrix
+$F_{ij}=\EE[\partial_i\log|\Psi|^2\,\partial_j\log|\Psi|^2]$ has eigenvalues spanning
+many orders of magnitude, because parameters controlling short-range correlation and
+parameters controlling the orbital envelope act on scales separated by
+$1/\sqrt{\omega}$.
+
+Ill-conditioning alone does not account for the failure, because ill-conditioning is what
+makes natural gradients useful in the first place; a well-conditioned metric is one Adam
+handles unaided. What disqualifies them is the failure to \emph{estimate} the metric. $F$ is
+built from importance-resampled points, and when the ESS is low a handful of high-weight
+samples dominate it, leaving it noisy and rank-deficient. Tikhonov damping stabilises the
+inversion at the cost of washing out the curvature information that motivated it.
+
+Three regimes follow. Where the metric is well conditioned, SR is sound and unnecessary. Where it is anisotropic and still estimable, SR is at its most
+valuable---which is the collocation case of \S\ref{sec:kernel-cond}. And where
+importance-sampling collapse makes the empirical metric unreliable, inverting it
+amplifies the estimation noise and SR does active harm. The failures above are the third
+regime, not the second, and the practical implication is about the estimator rather than
+the curvature: any second-order method applied to a weakly confined many-body system must
+certify that the metric it inverts is statistically resolved at the sample sizes in use.
+
+\paragraph{Why pushing the samples uphill makes things worse.}
+\label{sec:colloc-langevin-discussion}
+Langevin refinement was motivated by an intuition that is hard to argue with. If the
+Gaussian proposal overlaps $|\Psi|^2$ poorly, evolve the samples up the score
+$\nabla_{\mathbf R}\log|\Psi|^2$ for $K$ steps before reweighting, and the overlap should
+improve. It failed in every configuration tested, and the reason is standard in the MCMC
+literature and easy to miss in an importance-sampling setting.
+
+The weights $w_i=|\Psi(\mathbf R_i)|^2/q(\mathbf R_i)$ are valid only if the
+$\mathbf R_i$ came from $q$. After $K$ steps from an out-of-equilibrium start the samples
+follow some intermediate $\tilde q$ that depends on $K$ and $\varepsilon$, while the
+weights still divide by $q$. The resulting bias is not noise. It pushes the wavefunction
+toward the regions the Langevin dynamics favours, which moves $\tilde q$ further the same
+way, and the loop closes on itself---which is what the $+153\%$ in the table is. Ten to
+twenty steps in $Nd{=}40$ dimensions do not equilibrate. Fixing it means running to
+equilibrium, adding a Metropolis--Hastings step, or computing annealed weights along the
+non-equilibrium path. The first two are MCMC under another name; the third costs enough
+to forfeit the advantage that made the route attractive.
+
+\paragraph{What the failures have in common.}
+Read together these are not separate disappointments. Four of them (CG-SR, Langevin, the Pfaffian's parameter count, and the backflow at $N{=}20$) fail through one channel: a
+quantity that must be \emph{estimated} from a finite sample degrades faster than the
+quantity it was meant to improve. Natural gradients need an estimate of the metric.
+Langevin needs samples that have actually equilibrated. A larger parameter space needs a
+correspondingly better-resolved gradient. None of these methods is wrong in principle,
+and each would be sound given samples we cannot afford. What fails is the estimate, and
+it fails precisely in the regime where the correction was supposed to help. That thread is
+what \S\ref{sec:colloc-reliability} follows deliberately, from the proposal mismatch at
+one end to the evaluation bottleneck at the other.
+
+\subsection{Reliability analysis: the gradient-quality chain}
+\label{sec:colloc-reliability}
+
+The results in Table~\ref{tab:collocation} report the \emph{best} energies
+obtained by collocation training, selected from multiple runs on different
+seeds.
+A natural question is whether these results are \emph{typical} or whether
+they reflect rare fortunate outcomes from a high-variance process.
+This subsection reports a systematic 30-run reliability campaign designed
+to answer that question, and exposes a mechanistic chain that accounts for
+both the successes and failures of the Markov-chain-free collocation approach.
+
+\subsubsection{Experimental design}
+
+All runs use the BF+Jastrow ansatz (${\sim}49\text{k}$ parameters)
+initialised from the same pretrained checkpoint.
+The grid is $N{=}6$ across
+$\omega\in\{1.0,\,0.5,\,0.1,\,0.01,\,0.001\}$ with three random
+seeds per cell (42, 137, 314), giving $5\times 2\times 3 = 30$ runs.
+Two training recipes are compared head-to-head:
+
+\begin{itemize}
+\item \textbf{Config~A (baseline):} Adam optimiser with
+  $\text{lr}{=}5{\times}10^{-4}$, $\text{lr}_{\text{jas}}{=}5{\times}10^{-5}$,
+  4096 collocation points, $8{\times}$ oversampling, local-energy
+  clipping at $5\sigma$, no reward normalisation, no rollback, fixed
+  Gaussian mixture proposal (Eq.~\eqref{eq:colloc-proposal}).
+
+\item \textbf{Config~B (robust):} Identical to Config~A plus four
+  stabilisation mechanisms: $16{\times}$ oversampling (doubling the
+  proposal budget), reward normalisation (standardising the REINFORCE
+  reward to zero mean and unit variance before the gradient step),
+  instability rollback (reverting to the previous checkpoint when the
+  energy jumps exceed $3\sigma$, with learning-rate decay of $0.95$),
+  and an adaptive Gaussian mixture proposal (8 GMM components refitted
+  every 30 epochs to track the evolving $|\Psi|^2$).
+\end{itemize}
+
+All runs train for 1200 epochs.
+Evaluation uses a 20\,000-sample VMC probe every 50 epochs, with the
+best-VMC checkpoint restored for a final 20\,000-sample IS evaluation.
+
+\subsubsection{Main results}
+
+Table~\ref{tab:reliability} gives all thirty runs, three seeds per cell.
+
+\begin{table}[htbp]
+  \centering
+  \caption[Reliability campaign: 30 runs across five confinements]{Reliability campaign:
+  relative energy deviations for $N{=}6$ across five trap frequencies, scored against the
+  reference column of Table~\ref{tab:collocation}---external at $\omega\ge0.1$, and our own
+  converged SR--VMC energy at $\omega\le0.01$, where the deviation then measures internal
+  consistency rather than absolute accuracy. Each cell is the final IS-evaluated deviation
+  for one $(\omega,\text{recipe},\text{seed})$ combination. Bold marks the best run at each
+  $\omega$. The last two columns give the mean $\pm$ standard deviation and the worst of the
+  three seeds; these quantify the reliability of the final IS evaluator, not trained-state
+  quality independently of that evaluator. The standard
+  deviation is reported in place of a coefficient of variation because the latter is
+  uninformative when the mean deviation approaches zero.}
+  \label{tab:reliability}
+  \small
+  \setlength{\tabcolsep}{4.5pt}
+  \begin{tabular}{r l rrr cc}
+    \toprule
+    $\omega$ & Recipe & Seed 42 & Seed 137 & Seed 314 & mean $\pm$ s.d. & worst \\
+    \midrule
+    1.0 & Baseline & $+0.073$ & $+0.045$ & $+0.060$ & $0.059\pm0.014$ & $0.073$ \\
+     & Robust & $+0.032$ & $\mathbf{+0.013}$ & $+0.105$ & $0.050\pm0.049$ & $0.105$ \\
+    \midrule
+    0.5 & Baseline & $+0.106$ & $+0.060$ & $+0.108$ & $0.091\pm0.027$ & $0.108$ \\
+     & Robust & $\mathbf{+0.002}$ & $+0.112$ & $+0.047$ & $0.054\pm0.055$ & $0.112$ \\
+    \midrule
+    0.1 & Baseline & $+0.419$ & $+0.547$ & $+0.427$ & $0.464\pm0.072$ & $0.547$ \\
+     & Robust & $+0.325$ & $\mathbf{+0.263}$ & $+0.270$ & $0.286\pm0.034$ & $0.325$ \\
+    \midrule
+    0.01 & Baseline & $+0.500$ & $+0.379$ & $+0.746$ & $0.542\pm0.187$ & $0.746$ \\
+     & Robust & $+0.289$ & $+0.282$ & $\mathbf{+0.237}$ & $0.269\pm0.028$ & $0.289$ \\
+    \midrule
+    0.001 & Baseline & $+3.876$ & $+7.187$ & $+4.733$ & $5.265\pm1.718$ & $7.187$ \\
+     & Robust & $\mathbf{+0.250}$ & $+0.331$ & $+0.263$ & $0.281\pm0.044$ & $0.331$ \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+The stabilisation mechanisms buy nothing at strong confinement, where the two recipes sit
+inside each other's seed spread, and everything at weak confinement. At $\omega=10^{-3}$ the
+mean error falls by a factor of nineteen, from $+5.3\%$ to $+0.28\%$, and the \emph{worst}
+robust seed beats the \emph{best} baseline seed by an order of magnitude. The best single run
+at every confinement is a robust one. What follows explains why the difference appears
+exactly where it does.
+
+
+\subsubsection{The gradient-quality chain}
+\label{sec:gradient-chain}
+
+The reliability campaign exposes a mechanistic chain that accounts for
+the quality of collocation-trained wavefunctions:
+\begin{equation}
+\boxed{\;\begin{aligned}
+  \text{proposal mismatch}
+  &\;\longrightarrow\;
+  \hat{k}\text{ inflation}
+  \;\longrightarrow\;
+  \text{gradient noise}\\
+  &\;\longrightarrow\;
+  \text{optimisation stochasticity}
+  \;\longrightarrow\;
+  \text{run-to-run variance}
+\end{aligned}\;}
+\label{eq:chain}
+\end{equation}
+Each link can be checked quantitatively against the training logs, and each is supported
+below. One caveat on how strongly to read the arrows: the robust recipe changes four things at once (oversampling, reward normalisation, rollback and adaptive proposal refitting) so
+the chain is a mechanism consistent with every measurement we have, not a set of
+individually isolated causal links. We did not ablate the four stabilisers separately.
+
+\paragraph{Step 1: proposal--target mismatch.}
+The REINFORCE estimator of Eq.~\eqref{eq:reinforce-method} requires samples from
+$|\Psi_\theta|^2$, but collocation draws from the analytic mixture
+$q(\mathbf R)$ of Eq.~\eqref{eq:colloc-proposal} and reweights. Everything depends on how
+well $q$ overlaps the target. At $\omega=1$ the electrons occupy a compact cloud of radius
+$\ell=\omega^{-1/2}$ and the three-component mixture covers it. At $\omega=10^{-3}$ the cloud
+extends to ${\sim}100\,a_0^\ast$ against $\ell\approx31.6\,a_0^\ast$, the pair correlation
+develops sharp shell structure (\S\ref{sec:wigner-molecule}), and the mass concentrates in a
+thin correlated region an isotropic Gaussian covers badly.
+
+The mismatch shows directly in the importance weights.
+At $\omega{=}1.0$, weights are relatively uniform:
+the effective sample size is typically ESS~$\sim$~5000--6000
+out of the ${\sim}65\text{k}$ \emph{raw proposal draws} ($16{\times}$ oversampling of 4096
+points)---the second of the two normalisations noted in
+\S\ref{sec:kernel-cond}---and the Pareto shape parameter $\hat{k}$ of the
+weight tail is 0.4--0.5, indicating a well-behaved thin-tailed
+distribution.
+At $\omega{=}0.001$, the ESS collapses to 1--6 out of the same
+$65\text{k}$ draws, and $\hat{k}$ rises above $1.0$, indicating a
+catastrophically heavy fitted tail and a sample far from the regime in which the reweighted
+estimator is reliable.
+
+\paragraph{Step 2: $\hat{k}$ inflation and gradient quality.}
+The tail index $\hat{k}$ of the importance weights turns that mismatch into a number
+(\S\ref{subsec:colloc-proposal}): below $0.7$ the reweighted estimator is trustworthy,
+above $1.0$ the fitted tail is heavy enough that a handful of samples dictates the update.
+Two qualifications keep the reading honest. $\hat k$ is fitted to the \emph{weights}, not to
+the full gradient integrand $w\,(E_L-b)\,\nabla_\theta\log|\Psi_\theta|$, whose tail index
+we do not measure; and because $w$ is a ratio of proper densities its mean is finite in the
+limit, so $\hat k>1$ diagnoses a sample far from that limit rather than a gradient that
+fails to exist. What the campaign establishes is severe proposal--target mismatch and a
+gradient estimator dominated by a few draws. That is enough to explain everything
+downstream, and it is all we claim.
+
+Table~\ref{tab:khat-regime} summarises the average $\hat{k}$ across
+the campaign.
+The correspondence between $\hat{k}$ and final accuracy is
+striking.
+
+\begin{table}[htbp]
+  \centering
+  \caption[Pareto $\hat{k}$ by regime and recipe]{Average Pareto $\hat{k}$ of the importance
+  weight distribution during training, by regime and recipe. Lower is better. The fitted
+  tail has finite variance only for $\hat k<1/2$ and a finite mean only for $\hat k<1$;
+  $\hat k<0.7$ is the practical reliability threshold, and $\hat k>1$ indicates a sample so
+  far from the asymptotic regime that the estimator behaves as though no finite mean existed
+  (\S\ref{subsec:colloc-proposal}).}
+  \label{tab:khat-regime}
+  \small
+  \begin{tabular}{r cc cc}
+    \toprule
+    & \multicolumn{2}{c}{$\hat{k}$ (avg)} & \multicolumn{2}{c}{Mean error (\%)} \\
+    \cmidrule(lr){2-3} \cmidrule(lr){4-5}
+    $\omega$ & Baseline & Robust & Baseline & Robust \\
+    \midrule
+    1.0   & 0.75 & 0.50 & 0.059 & 0.050 \\
+    0.5   & 0.83 & 0.54 & 0.091 & 0.054 \\
+    0.1   & 1.48 & 0.70 & 0.464 & 0.286 \\
+    0.01  & 2.63 & 1.39 & 0.542 & 0.269 \\
+    0.001 & 3.13 & 1.86 & 5.265 & 0.281 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+The robust recipe reduces $\hat{k}$ by a factor of $1.5$ to $2.1$, with the larger
+reductions at the confinements where the baseline is worst.
+At $\omega{=}1.0$ this takes $\hat{k}$ from 0.75 (borderline) to
+0.50 (reliable), resulting in a modest improvement.
+At $\omega{=}0.1$ it takes $\hat{k}$ from 1.48 (broken) to 0.70
+(borderline), corresponding to the transition from mediocre
+($+0.46\%$) to marginal ($+0.29\%$) accuracy.
+At $\omega{=}0.001$ even the robust recipe has $\hat{k}{=}1.86$,
+but the adaptive proposal and rollback mechanisms prevent the
+catastrophic divergence seen in the baseline ($+5.3\%$).
+
+\paragraph{Step 3: from gradient noise to optimisation stochasticity.}
+When $\hat{k}$ is large, most of the gradient signal comes from a
+few samples with extreme importance weights.
+Which samples are extreme depends on the random proposal draw at
+each epoch---a function of the random seed.
+Two seeds that happen to draw different extreme samples will follow
+different optimisation trajectories, even though they share the same
+architecture and hyperparameters.
+
+This is not the usual seed dependence of stochastic gradient
+descent, where the law of large numbers ensures that gradient
+estimates are unbiased and the trajectory variance decreases with
+batch size.
+When $\hat{k} > 1$ the weight distribution is so heavy-tailed that the realised estimator
+behaves as though its variance were unbounded: increasing the batch size reduces the spread
+sublinearly, and extreme draws continue to dominate the update at every batch size we could
+afford.
+The result is optimisation trajectories that diverge qualitatively
+across seeds, explaining the large run-to-run variance observed
+at low~$\omega$.
+
+\paragraph{Step 4: the evaluation bottleneck.}
+An additional subtlety is that the final energy evaluation itself
+uses importance sampling from the same proposal distribution.
+Even if the model has found an excellent wavefunction, a noisy
+evaluation can report a misleading energy.
+
+The data expose this directly.
+Table~\ref{tab:vmc-gap} compares the VMC-best energy seen during
+training (a 20\,000-sample Metropolis probe from the model's own
+$|\Psi|^2$, used for checkpoint selection) with the final IS
+evaluation that uses the Gaussian proposal.
+At high~$\omega$ where IS is reliable, the two estimates agree
+closely.
+At low~$\omega$, the gap between them grows, and its sign is
+unpredictable---the IS evaluation can overestimate or underestimate
+the true energy.
+
+\begin{table}[htbp]
+  \centering
+  \caption[Gap between the VMC probe and the IS evaluation]{Gap between VMC-best checkpoint energy (Metropolis sampling
+  from $|\Psi|^2$) and final IS evaluation, for selected runs.
+  Positive gap means IS reports higher (worse) energy than the VMC
+  probe saw.}
+  \label{tab:vmc-gap}
+  \small
+  \begin{tabular}{r l l cc c}
+    \toprule
+    $\omega$ & Recipe & Seed & VMC-best (\%) & Final IS (\%) & Gap (\%) \\
+    \midrule
+    1.0   & Baseline & 314 & $+0.001$ & $+0.060$ & $+0.059$ \\
+    1.0   & Robust   & 137 & $+0.002$ & $+0.013$ & $+0.011$ \\
+    0.5   & Robust   & 42  & $+0.037$ & $+0.002$ & $-0.035$ \\
+    0.1   & Robust   & 137 & $+0.136$ & $+0.263$ & $+0.127$ \\
+    0.01  & Baseline & 42  & $+0.320$ & $+0.500$ & $+0.180$ \\
+    0.001 & Baseline & 314 & $+4.114$ & $+4.733$ & $+0.619$ \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+The first row is particularly instructive: this baseline run with
+seed~314 achieved a VMC-best energy of $+0.001\%$---essentially
+exact---during training, but the IS evaluation reports $+0.060\%$.
+The wavefunction is excellent; the evaluation is noisy.
+This demonstrates that some nominally ``bad'' runs may contain
+excellent wavefunctions measured poorly, and some nominally ``good''
+results may benefit from evaluation noise in the favorable direction.
+
+\paragraph{Summary of the chain.}
+The chain in Eq.~\eqref{eq:chain} provides a unified account of
+the full landscape of collocation results.
+At high~$\omega$, the proposal matches the target well
+($\hat{k}\sim 0.5$), gradients are reliable, optimisation is
+stable, and all seeds converge to near-DMC accuracy.
+At low~$\omega$, the proposal-to-target mismatch grows, $\hat{k}$
+inflates, gradients become noisy, optimisation becomes seed-dependent,
+and the evaluation itself becomes unreliable.
+The robust recipe acts on multiple links of this chain simultaneously:
+higher oversampling improves the raw ESS, reward normalisation
+stabilises the gradient scale, rollback prevents catastrophic
+divergence, and the adaptive proposal reduces the fundamental
+mismatch.
+No single mechanism is sufficient; each addresses a different link
+in the chain.
+\subsection{The memory wall at $N{=}20$}
+\label{sec:colloc-arch-discussion}
+
+The reversal of the backflow advantage at $N{=}20$ highlights an
+important architectural trade-off.
+The message-passing backflow (\texttt{CTNNBackflowNet}, \S\ref{subsec:ctnn-backflow})
+stores edge features of size
+$\mathcal{O}(N^2 \times h_{\text{bf}})$, which at $N{=}20$ with
+$h_{\text{bf}}{=}128$ requires ${\sim}10\times$ the memory of the
+Jastrow-only network.
+This forces a choice: reduce $h_{\text{bf}}$ (losing expressivity),
+reduce the collocation budget (losing gradient quality), or reduce
+the oversampling factor (losing ESS).
+All three options degrade the result.
+
+The Jastrow-only network, with ${\sim}25$k parameters and
+$\mathcal{O}(N^2)$ edge cost (no hidden-dimension multiplier),
+permits full-size collocation budgets ($n_{\text{coll}}{=}4096$,
+oversample${=}8$--$16$) even at $N{=}20$.
+The resulting gradient is less noisy, and the simpler loss landscape
+(fewer parameters) makes optimisation more reliable.
+
+This does not mean that backflow is unnecessary at $N{=}20$; it
+means that the current training pipeline cannot supply enough
+gradient signal to train backflow effectively at this scale.
+The implication is that scaling collocation to larger systems
+requires either (i)~memory-efficient backflow architectures
+(e.g.\ sparse attention, low-rank message passing), or
+(ii)~improved sampling that provides higher ESS at constant
+computational cost.
+
+\section{A physics-informed proposal and its limit}
+\label{sec:kernel-q3-frontier}
+
+The ESS collapse of \S\ref{sec:kernel-cond} is a limitation of the \emph{proposal}, not
+of collocation itself, and it can be pushed back a long way. A physics-informed proposal
+carries Markov-chain-free collocation deep into the Wigner regime; what limits it, and the wall
+that survives, follow from the same physics.
+
+\subsection{The origin-centred proposal misses the Wigner shell}
+Every proposal in the standard pipeline is a mixture of \emph{origin-centred} Gaussians,
+\begin{equation}
+  q(\mathbf{R})\;=\;\frac{1}{K}\sum_k \mathcal{N}\!\left(\mathbf{R};\,0,\,
+  \sigma_{f,k}^{2}/\omega\right).
+\end{equation}
+But as $\omega\to0$ the electrons localise into a Wigner molecule on a \emph{shell} far
+from the origin. The classical $N=6$ minimum is the $(1,5)$ configuration: one central electron
+and five on a ring of radius $1.334\,\omega^{-2/3}$
+\cite{schweigert1994spectralpropertieschargedparticles,Kong_2002}. In oscillator units
+that ring sits at $1.96$, $2.87$ and $4.22\,\ell$ for $\omega=0.1$, $0.01$ and $0.001$,
+moving outward as the trap weakens and past the reach of a width-$2\ell$ origin
+Gaussian. The proposal aims where $|\Psi|^2$ has
+no mass; hence the collapse.
+
+\subsection{The Wigner-ring proposal}
+
+Before the numbers, one distinction has to be exact, because ``Markov-chain-free'' is a claim of
+this thesis. The Wigner geometry enters in three roles and only the third sits inside the
+training loop. \emph{(i)} A proposal can be \emph{evaluated} against a trusted state
+obtained by MCMC, which is how Table~\ref{tab:ring-ess} is produced---a measurement, not a
+training step, and one that uses a chain by design. \emph{(ii)} Its geometry can be
+\emph{fitted} to $|\Psi_\theta|^2$ samples as a diagnostic. \emph{(iii)} In production it is
+refitted from the current importance-weighted batch alone, with no chain anywhere; that is
+the genuinely Markov-chain-free adaptation used in the cascade of
+\S\ref{sec:kernel-q3-frontier}. Throughout, a Metropolis probe still runs outside the
+gradient loop to select checkpoints and certify the final energy, and no sample it produces
+ever reaches a parameter update.
+We replace the origin mixture with a \emph{Wigner-ring} proposal: a radial Gaussian at the
+shell radius times an angular distribution for the ring electrons, plus a central Gaussian.
+On trusted states this lifts the effective sample size by $15$--$32\times$ over the origin
+mixture (Table~\ref{tab:ring-ess}), turning a collapsed sampler into a usable one---without
+any training. Fitting the ring to $|\Psi|^2$ samples (the simplest
+adaptive form) doubles the ESS again; a $(1,5)+(0,6)$ mixture \emph{hurts} at $N=6$, since
+the state is $(1,5)$ and the extra channel dilutes the proposal mass.
+
+\begin{table}[htbp]\centering
+\caption[ESS of the origin and Wigner-ring proposals]{ESS (of 4096) against a trusted $N=6,\omega=0.01$ state. The origin mixture is
+already collapsed; the ring proposal covers the shell.}
+\label{tab:ring-ess}
+\begin{tabular}{lc}
+\hline
+proposal & ESS \\
+\hline
+origin-Gaussian mixture (standard) & $1.5$ \\
+Wigner ring $(1,5)$, hand-tuned & $22.5$ \\
+Wigner ring $(1,5)$, fitted to $|\Psi|^2$ & $47.5$ \\
+\hline
+\end{tabular}
+\end{table}
+
+\subsection{Angular crystallisation defeats the uniform-angle ring proposal}
+Why does the ring work at $\omega=0.01$ but fail at $\omega=0.001$? The molecule
+\emph{crystallises angularly} as the trap weakens. The nearest-neighbour angular-gap
+standard deviation of the five ring electrons is $40.8^\circ/33.3^\circ/25.5^\circ/6.7^\circ$
+at $\omega=1/0.1/0.01/0.001$: a ``ring liquid'' at moderate coupling becomes an angular
+crystal (electrons pinned near $72^\circ$ apart) at $\omega=0.001$. A proposal with
+independent, uniform angles almost never lands on the crystalline configuration---so the
+angular distribution must crystallise too. This is captured Markov-chain-free by modelling the five
+gaps (which sum to $2\pi$) as $\mathrm{Dirichlet}(\alpha)$: an exact tractable density whose
+single concentration $\alpha$ interpolates liquid ($\alpha$ small) to crystal ($\alpha$
+large), fitted to the measured gap variance. This diagnosis \emph{explains} the collocation
+wall that is otherwise only observed.
+
+\subsection{An MCMC-free cascade reaches $\omega=0.0035$}
+Combining the ring proposal (radial Gaussian $\times$ Dirichlet gaps) with importance
+oversampling, a \emph{continuous} adaptive re-fit of the proposal to the current
+importance-weighted batch (every few steps, no MCMC), and a gentle $\omega$-cascade
+seeded from a converged $\omega=0.01$ state, Markov-chain-free collocation produces states that
+lie on the Wigner energy-scaling curve down to $\omega=0.0035$---four cascade rungs, with
+heavy-VMC energies within $2\%$ of the scaling estimate, and within $1\%$ on three of the
+four rungs (Table~\ref{tab:cascade}),
+well past where the origin proposal collapses ($\mathrm{ESS}\!\approx\!1.5$ of $4096$ at
+$\omega=0.01$, Table~\ref{tab:ring-ess}).
+
+Three things bound that result. The agreement in Table~\ref{tab:cascade} is against a
+scaling curve fitted to our own $\omega=0.01$ energy, so it establishes continuity rather
+than accuracy; two structural checks support it---the radial density peaks at $3.34\ell$
+against a classical ring at $3.42\ell$, and a sampler initialised on the shell converges to the same peak, not a second basin. No \emph{angular} diagnostic was run at
+$\omega=0.0035$: the bond-order and Lindemann machinery of \S\ref{sec:wigner-angular} ran on
+the production grid, not the cascade rungs, and those states were not retained. So a Wigner
+molecule at $\omega=0.0035$ rests here on energy continuity and radial geometry, not on
+demonstrated angular order. And the Markov-chain-free claim is a claim about the gradient---no
+Metropolis sample reaches a parameter update at any rung---not about ancestry: each rung is
+warm-started from a stronger confinement, and that ladder runs back to a pretrained
+checkpoint whose residual objective used an external energy as its target. The frontier
+parameters therefore inherit structure shaped several confinements upstream by
+reference-guided pretraining, the same inheritance the SR--VMC states carry
+(\S\ref{sec:energy-discussion}). The essential ingredient is the continuous re-fit: it keeps ESS healthy
+($\sim\!10^2$) \emph{while} the energy descends, where a static or slowly-updated proposal
+collapses to $\mathrm{ESS}\!\sim\!1$ as the wavefunction moves away from it.
+
+\begin{table}[htbp]\centering
+\caption[MCMC-free Wigner-ring cascade, $N{=}6$]{Markov-chain-free Wigner-ring cascade, $N=6$: heavy-VMC energy vs.\ the fitted Wigner
+scaling curve $E(\omega)\approx 0.690\,(\omega/0.01)^{0.689}$, whose exponent is close to
+the classical $2/3$ but whose prefactor is anchored at $\omega=0.01$, where no external
+reference exists. The agreement is therefore internal scaling consistency, not validation,
+and it is retained through $\omega=0.0035$.}
+\label{tab:cascade}
+\begin{tabular}{lccc}
+\hline
+$\omega$ & $E$ & scaling est. & ratio \\
+\hline
+0.0077 & 0.577 & 0.577 & 1.00 \\
+0.0059 & 0.481 & 0.480 & 1.00 \\
+0.0045 & 0.400 & 0.398 & 1.01 \\
+0.0035 & 0.340 & 0.335 & 1.02 \\
+\hline
+\end{tabular}
+\end{table}
+
+\subsection{The remaining limit: the Slater--Jastrow balance}
+Below $\omega=0.0035$ the cascade becomes unstable, and---informatively---the instability
+is \emph{non-monotonic} across proposal variants: wide-exploratory, tempered-tracking, and
+outward-anchored proposals each converge some rungs and diverge others. That pattern
+locates the obstacle not in the proposal but in the warm-start, and four transfer diagnostics
+(taking the converged $\omega=0.0035$ rung down to $\omega=0.0027$, a $23\%$ step) pin down
+its mechanism precisely.
+
+\paragraph{Where the collapse lives.} First, the frontier state is a genuinely
+Wigner-localised one on the evidence available: at
+its own $\omega=0.0035$ its radial density peaks at $3.34\ell$ against a classical ring at
+$3.42\ell$, and it occupies a \emph{single} basin---initialising the sampler on the shell
+converges to the same $3.34\ell$. We stop short of calling it a Wigner molecule in the sense
+Chapter~\ref{ch:results} defines, because that definition requires registered angular order
+and no angular diagnostic was run on this state.
+Transferred to $\omega=0.0027$, however, the wavefunction collapses to $\sim\!1\ell$, and two
+tests show \emph{where} the collapse lives. It is not the sampler: initialising the Metropolis
+walkers directly on the classical shell ($3.57\ell$) still relaxes inward to $1.1\ell$, so the
+collapsed density is a property of the ansatz, not of sampler initialisation. And it is not the
+backflow: its displacement is small ($|\Delta\mathbf{x}|\approx0.13\ell$, radially inward) and
+essentially \emph{preserved} across the transfer ($0.15\ell\!\to\!0.13\ell$)---it scales
+correctly with $\ell$ but is far too small to bridge the $2.4\ell$ gap between the Slater core
+($\sim\!1\ell$) and the Wigner shell.
+
+\paragraph{The mechanism.} A delicate cancellation. The bare harmonic-oscillator determinant suppresses
+the shell by $\exp(-\omega r^2/2)\!\sim\!\exp(-5.6)$ in amplitude ($\sim\!10^{-5}$ in density);
+the Wigner peak exists only because the Jastrow amplifies it back by a comparable factor, with
+the backflow contributing a small inward nudge. A $23\%$ change in $\omega$ perturbs both the
+Slater confinement and the Jastrow correlation length, the fine-tuned balance tips, and the
+density falls back to the non-interacting shell---from which the collocation re-fit cannot
+reliably climb out (hence the non-monotonic proposal behaviour). This rules out the natural fix of an $\omega$-robust warm-start by coordinate rescaling:
+because the ansatz relaxes inward even when handed shell configurations, no coordinate
+transform preserves the state across the step. It does not rule out representing the
+$\omega=0.0027$ state at all---that would require optimising it from scratch there, which we
+did not do. Reaching
+$\omega<0.0035$ would require per-$\omega$ re-optimisation against a shell-\emph{amplitude}-anchored
+objective, or a genuinely $\ell$-covariant parametrisation---a distinct problem left to future
+work. The contribution here is concrete: a physics-informed proposal that carries Markov-chain-free
+collocation from the origin-proposal wall down to a radially localised Wigner-regime state at
+$\omega=0.0035$,
+and a precise account of the angular-crystallisation and Slater--Jastrow-balance effects that
+bound it.
+
+% =====================================================================
+% =====================================================================

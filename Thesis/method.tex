@@ -1,0 +1,1257 @@
+\begingroup
+\let\clearpage\relax
+\let\cleardoublepage\relax
+\chapter{The trial wavefunction}
+\label{ch:trial_wavefunction}
+\endgroup
+
+The trial state is constructed to satisfy fermionic antisymmetry and the electron--electron
+cusp analytically, and to keep the learned terms smooth under the Laplacian. Antisymmetry
+requires a determinant. The Coulomb divergence admits an analytic cancellation, so it is imposed, not learned. Second derivatives enter the loss, so the features fed to the
+network are bounded and smooth and the coordinates are scaled to keep those derivatives
+$\mathcal{O}(1)$ across three decades of confinement. The form of the learned part is not
+fixed by these constraints; both candidate architectures are constructed here and compared
+in Chapter~\ref{ch:kernel}. Unless stated otherwise we work in atomic units.
+
+\section{Preliminaries}
+\label{sec:setup}
+
+\paragraph{Hamiltonian and units.}
+We study $N$ spin-$\tfrac12$ fermions in two spatial dimensions confined by a harmonic trap
+and interacting via Coulomb repulsion,
+\begin{equation}
+\label{eq:dot-h}
+H \;=\; \sum_{i=1}^N \Big( -\tfrac12 \nabla_{\mathbf r_i}^2 + \tfrac12 \,\omega^2 r_i^2 \Big)
+\;+\; \sum_{1\le i<j\le N} \frac{1}{|\mathbf r_i-\mathbf r_j|},
+\qquad (\hbar=m_e=e=1).
+\end{equation}
+Spin does not appear in $H$; eigenstates factorize into a spatial function with good $L_z$ and a
+spin function with good $(S,S_z)$.
+
+\paragraph{Coordinates and scaling.}
+We collect positions as $R=(\mathbf r_1,\ldots,\mathbf r_N)\in\mathbb R^{2N}$ and use trap scaling
+$\tilde{\mathbf r}_i=\sqrt{\omega}\,\mathbf r_i$, $\tilde{R}=\sqrt{\omega}\,R$. This aligns typical
+length scales to $\mathcal O(1)$, improves conditioning of second derivatives, and makes the
+noninteracting ground state $\omega$-independent. When useful, we also use pair distances
+$r_{ij}=|\mathbf r_i-\mathbf r_j|$ and their scaled versions $\tilde r_{ij}=|\tilde{\mathbf r}_i-\tilde{\mathbf r}_j|$.
+
+\paragraph{Sectors and focus.}
+We primarily report \emph{closed-shell} cases (unique spin singlet at the noninteracting level).
+Open shells introduce a degenerate manifold and additional choices for the reference; we keep this
+to brief remarks only where needed.
+
+\paragraph{Spin–orbitals and basis.}
+One-particle spatial orbitals are the Cartesian two-dimensional harmonic-oscillator
+eigenstates $\{\phi_{n_x n_y}(\mathbf r)\}$ with $E_{n_x n_y}=\omega(n_x+n_y+1)$,
+$n_x,n_y\in\mathbb N_0$ (the basis used in the implementation; for the closed shells studied
+it spans the same filled shells as any complete basis of those shells). Spin–orbitals
+are $\varepsilon_\alpha(x)=\phi_{n_x n_y}(\mathbf r)\chi_\sigma(s)$, $\sigma\in\{\uparrow,\downarrow\}$.
+
+% ==========================================================
+
+\section{Overview of the ansatz}
+\label{sec:ansatz}
+Our trial state combines exact antisymmetry, an analytic short-range cusp, and a compact
+neural residual, while optionally evaluating the Slater determinant on backflowed coordinates:
+\begin{align}
+  \Psi_{\theta,\beta}(R)
+  &= \mathrm{SD}\big(\tilde{R}'\big)\;
+     \exp\!\Big(
+       \sum_{i<j} u_{\sigma_i \sigma_j}(r_{ij})
+       + W_\theta(\tilde{R})
+     \Big),\label{eq:ansatz-overall} \\
+  \tilde{R}' &= \tilde{R} + \Delta_\beta(\tilde{R}).\label{eq:bf-coords}
+\end{align}
+Here $\mathrm{SD}$ enforces antisymmetry; $u$ hard-wires the Kato cusp; $W_\theta$ (the NQS correlator) learns smooth
+medium/long-range structure; and $\Delta_\beta$ (backflow) adjusts the nodes by smoothly warping the coordinates used
+inside the determinants; its per-particle displacements $\Delta_{\beta,i}$ are written
+$\Delta\mathbf{x}_i$ in the results chapters. We deliberately feed the NQS with $\tilde{R}$ (not $\tilde{R}'$) to avoid self-reinforcing feedback
+and keep local-energy variance low.
+
+\paragraph{Design principles.}
+(i) \emph{Separate guaranteed physics from learned details:} antisymmetry and the cusp are hard-wired; the network learns the rest.
+(ii) \emph{Condition the geometry:} work in trap units and use soft-core pair features so that first/second derivatives are bounded.
+(iii) \emph{Keep the learned object small and smooth:} once the cusp is explicit, a compact NQS suffices across $(N,\omega)$.
+
+\section{Slater reference}
+\label{subsec:slater}
+For closed shells we use a restricted product of spin-block determinants of the lowest $N/2$ harmonic oscillator orbitals (trap units):
+\begin{equation}
+  \mathrm{SD}(\tilde{R})
+  =
+  \det\!\big[\phi_a(\tilde{\mathbf r}_i)\big]_{i\in\uparrow,\;a\le N/2}\;
+  \det\!\big[\phi_a(\tilde{\mathbf r}_j)\big]_{j\in\downarrow,\;a\le N/2}.
+  \label{eq:slater}
+\end{equation}
+The correlator reweights amplitudes \emph{within} nodal pockets; without backflow, the nodes are those of~\eqref{eq:slater}.
+
+\section{Neural correlator $W_\theta$}
+\label{subsec:nqs}
+As with the backflow, the correlator comes in two forms that are compared directly in
+\S\ref{sec:kernel-q1}: a \emph{separable} network that encodes particle- and
+pair-features independently and pools them, and a copresheaf \emph{message-passing}
+(CTNN) network. We describe the separable network first, since it is the baseline and supplies the safe features and analytic cusp shared by both, and then the message-passing one.
+
+\subsection{Separable correlator (DeepSets baseline)}
+\label{subsec:separable-correlator}
+The separable NQS aggregates \emph{particlewise} and \emph{pairwise} embeddings with permutation-invariant pooling and appends two global
+statistics, all in $\tilde{R}$. A core safety requirement is that pair channels satisfy $d s_k/d\tilde r \to 0$ as $\tilde r\to 0$
+so that $W_\theta$ never injects spurious $1/\tilde r$ terms into $\nabla\log\Psi$ or $\Delta\log\Psi$.
+
+\subsubsection{Particle branch (DeepSets).}
+This part of the network is typically referred to as Deep Sets~\cite{Zaheer2017-DeepSets}. The permutation invariance of quantum many-body mechanics is naturally captured by this architecture. 
+A neural network $\phi$ creates a latent embedding for each particle individually. All embeddings are pooled together to form a global representation, which is used later in the readout. Formally, we have
+\[
+  \mathbf h_i^\phi=\phi(\tilde{\mathbf x}_i)\in\mathbb R^{d_L},\qquad
+  \overline{\mathbf h}^{\phi}=N^{-1}\sum_i \mathbf h_i^\phi\in\mathbb R^{d_L}.
+\]
+
+\subsubsection{Pair branch (soft-core, even channels).}
+Although the particle branch could theoretically produce pair correlations, in practice it struggles to represent sharp near-field structure. We therefore add a dedicated pair branch that builds features from interparticle distances.
+This network processes all pairs $(i,j), i\ne j$ individually and pools the resulting latent embeddings. 
+The problem is that raw distances $\tilde r_{ij}$ have unbounded derivatives at coalescence, which destabilizes Laplacian evaluations. We therefore build \emph{safe} pair features with bounded first and second derivatives as $\tilde r\to 0$.
+With $\tilde r^{\rm soft}=\sqrt{\tilde r^2+\varepsilon^2}$ ($\varepsilon\!\in[0.15,0.30]$ in trap units), we build six “safe” features
+\begin{align}
+  s_1 &= \log\!\big(1+(\tilde r^{\rm soft}/\varepsilon)^2\big),\quad
+  s_2 = \tfrac{\tilde r^{2}}{\tilde r^{2}+\varepsilon^2},\quad
+  s_3 = (\tilde r^{\rm soft}/\varepsilon)^{2}\exp[-(\tilde r^{\rm soft}/\varepsilon)^{2}], \notag\\
+  \mathrm{rbf}_g &= \exp(-g\,s_1),\quad g\in\{0.25,1,4\},\qquad
+  \mathbf u_{ij}=[s_1,s_2,s_3,\mathrm{rbf}_{0.25},\mathrm{rbf}_{1},\mathrm{rbf}_4]\in\mathbb R^{6}.
+  \label{eq:safe-feats}
+\end{align}
+An MLP $\psi$ maps $\mathbf u_{ij}\mapsto\mathbf h^{\psi}_{ij}\in\mathbb R^{d_L}$. A short-range gate
+\[
+  \chi(\tilde r)=\frac{\tilde r^{2}}{\tilde r^{2}+r_g^{2}},\quad r_g\approx 0.3,\quad \chi(0)=\chi'(0)=0,
+\]
+suppresses learned responses \emph{at} coalescence; downstream we use
+$\chi\,\mathbf h^\psi_{ij}$.
+
+\subsection{Analytic short-range cusp (shared)}
+\label{subsec:cusp-implementation}
+The analytic cusp below is shared by both correlator variants (and is independent of the
+backflow). Because the safe features are necessary in the pair branch, the NQS cannot represent the Kato cusp condition exactly.
+We therefore add an analytic cusp term to the exponent in~\eqref{eq:ansatz-overall},
+written in \emph{physical} coordinates so that its slope at contact is manifestly
+correct:
+\begin{equation}
+  u_{\sigma\sigma'}(r)
+  =
+  \gamma_{\sigma\sigma'}\, r\, e^{-r/a_{\rm ho}},
+  \qquad a_{\rm ho}=1/\sqrt{\omega},
+  \qquad
+  \gamma_{\uparrow\downarrow}=\tfrac{1}{d-1},\quad
+  \gamma_{\uparrow\uparrow}=\tfrac{1}{d+1}.
+  \label{eq:cusp}
+\end{equation}
+Because the linear prefactor is the physical separation $r$, the slope at contact is
+$\partial_r u|_{0}=\gamma_{\sigma\sigma'}$, exactly the Kato condition in general $d$;
+for $d=2$ this gives $\gamma_{\uparrow\downarrow}=1$ and $\gamma_{\uparrow\uparrow}=\tfrac13$,
+the standard two-dimensional quantum-dot values, derived---including the parallel-spin
+case, where antisymmetry already forces a linear node---in
+Appendix~\ref{app:coulomb:cusp}. Only the exponential taper carries the trap length
+$a_{\rm ho}$, suppressing long-range interference so the NQS need not unlearn cusp
+structure at medium and long range; in trap units ($\tilde r=\sqrt{\omega}\,r$) the same
+term reads $u=(\gamma_{\sigma\sigma'}/\sqrt{\omega})\,\tilde r\,e^{-\tilde r}$.
+
+
+\subsection{Separable readout}
+With contributions from the particle and pair branches, we form a global representation for the final readout. In addition to the pooled embeddings $\overline{\mathbf h}^\phi$ and $\overline{\mathbf h}^\psi$, we also include two global statistics that help the network gauge overall system size and density.
+We average pairs by default or apply degree-normalised radial attention
+\[
+  w_{ij}=\exp[-(\tilde r_{ij}/r_c)^p],\quad
+  \hat w_{ij}=w_{ij}\Big/\sum_{k\ne i}w_{ik},\quad
+  (r_c,p)=(0.4,6),
+\]
+then form $g_i=\sum_{j\ne i}\hat w_{ij}\,\mathbf h^\psi_{ij}$ and $\overline{\mathbf h}^\psi=N^{-1}\sum_i g_i$.
+Two system-level scalars in trap units,
+\[
+  \mathbf g(\tilde{R})=
+  \Big[\tfrac{1}{Nd}\sum_i\|\tilde{\mathbf x}_i\|^2,\;
+       \tfrac{2}{N(N-1)}\sum_{i<j}s_1(\tilde r_{ij})\Big]\in\mathbb R^2,
+\]
+are concatenated with $\overline{\mathbf h}^{\phi}$ and $\overline{\mathbf h}^{\psi}$ and mapped to a scalar by a tiny MLP $\rho$:
+\begin{equation}
+  W_\theta(\tilde{R})
+  =
+  \rho\!\Big(\overline{\mathbf h}^{\phi}\ \|\ \overline{\mathbf h}^{\psi}\ \|\ \mathbf g(\tilde{R})\Big).
+  \label{eq:nqs-readout}
+\end{equation}
+
+\subsection{Message-passing correlator (CTNN)}
+\label{subsec:ctnn-correlator}
+The message-passing correlator keeps the same node/edge
+embeddings, safe pair features, and analytic cusp, but replaces the independent pooling of
+the separable network with the copresheaf transport of \S\ref{sec:ctnn-theory}: at each
+round the endpoint nodes are transported into an edge update and the updated edges are
+transported back and aggregated onto the nodes,
+\begin{equation}
+  \mathbf h_{ij} \mathrel{+}= F_e\!\big(\mathbf h_{ij}\,\|\,\rho_{v\to e}\mathbf h_i\,\|\,\rho_{v\to e}\mathbf h_j\big),
+  \qquad
+  \mathbf h_i \mathrel{+}= F_v\!\Big(\mathbf h_i\,\|\,\operatorname*{Agg}_{j\neq i} w_{ij}^{\rm spin}\,\rho_{e\to v}\mathbf h_{ij}\Big),
+  \label{eq:ctnn-corr-step}
+\end{equation}
+with residual updates and per-round transport maps. Unlike the single-round backflow, the
+correlator stacks these rounds in a multiscale ``V-cycle'': $n_{\downarrow}$ down-pass
+rounds, a linear coarsening to a bottleneck width, then $n_{\uparrow}$ up-pass rounds with
+skip connections back to the down-pass features (defaults $n_{\downarrow}=n_{\uparrow}=2$).
+A permutation-invariant readout over the final node and edge statistics returns the scalar
+$W_\theta(\tilde R)$, exactly as in~\eqref{eq:nqs-readout}. Holding the Slater reference,
+cusp, and training fixed and swapping only the separable readout for this V-cycle isolates
+the relational channel analysed in \S\ref{sec:kernel-q1}.
+
+\section{Backflow}
+\label{subsec:backflow-method}
+
+Backflow deforms the coordinates \emph{used only inside the Slater reference} so that the nodal surface can adapt to interparticle correlations:
+\begin{equation}
+  \tilde{R}' \;=\; \tilde{R} + \Delta_\beta(\tilde{R}) ,
+  \qquad
+  \Psi_{\theta,\beta}(R) \;=\; \mathrm{SD}(\tilde R')\;
+  \exp\!\Big(\sum_{i<j} u_{\sigma_i\sigma_j}(r_{ij}) + W_\theta(\tilde R)\Big).
+  \label{eq:bf-def}
+\end{equation}
+The correlator $W_\theta$ and cusp $u$ are evaluated on $\tilde R$ to avoid feedback loops in the local energy; only the determinant ``sees'' $\tilde R'$.
+This choice cleanly separates (i) amplitude reweighting within nodal pockets (handled by $u+W_\theta$) from (ii) nodal \emph{geometry} (handled by backflow).
+
+\paragraph{Design goals.}
+(i) \emph{Stability near coalescence:} messages are built from mollified radii and
+short-range gates so that $\partial \Delta_\beta/\partial \tilde r$ stays bounded;
+(ii) \emph{Permutation symmetry:} permutation equivariance holds by construction (shared
+maps and symmetric aggregation);
+(iii) \emph{Close to identity at initialisation:} a zero-initialised last layer and a
+positive learnable scale keep $\Delta_\beta\!\approx\!0$ at the start.
+Rotational symmetry, by contrast, is only \emph{approximate}: the displacement head reads
+out a $d$-vector from node features that include the raw coordinates, so the map is not
+rotation-equivariant by construction, and it is encouraged instead by the
+geometry-based edge features and by rotationally-augmented sampling. A global translation
+is not a symmetry of the trap in any case; the zero-mean projection~\eqref{eq:bf-com} is a
+regulariser that removes a spurious centre-of-mass drift, not an imposed physical symmetry.
+
+We study \emph{two} backflow architectures. Both map the configuration to a per-particle
+displacement field and share the output bounding, spin masking, and centre-of-mass
+projection below; they differ only in how a particle's displacement is made to depend on
+the others. The conventional network is the baseline of the architecture comparison in
+Chapter~\ref{ch:kernel}; the copresheaf \textsc{CTNN} is the production ansatz.
+
+\subsection{Conventional backflow (single-round messages)}
+The baseline uses a single round of pairwise messages. For
+each ordered pair $(i,j)$ with $i\neq j$,
+\begin{equation}
+  \mathbf m_{ij}
+  = \phi_\beta\!\big(
+      \tilde{\mathbf x}_i,\ \tilde{\mathbf x}_j,\ \mathbf r_{ij},\
+      \tilde r_{ij}^{\rm soft},\ (\tilde r_{ij}^{\rm soft})^2
+    \big)\cdot w_{ij}^{\rm spin},
+  \qquad \tilde r_{ij}^{\rm soft}=\sqrt{\tilde r_{ij}^2+\varepsilon_{\rm bf}^2},
+  \label{eq:bf-message}
+\end{equation}
+with $\phi_\beta$ a small MLP and $w_{ij}^{\rm spin}\in\{0,1\}$ a spin mask (same-spin only
+or all pairs). Messages are aggregated to a node state and a node network returns the
+displacement,
+\begin{equation}
+  \mathbf m_i = \operatorname*{Agg}_{j\neq i}\mathbf m_{ij},
+  \qquad
+  \delta\tilde{\mathbf x}_i = \psi_\beta\!\big(\tilde{\mathbf x}_i \,\|\, \mathbf m_i\big),
+  \qquad \mathrm{Agg}\in\{\mathrm{sum},\mathrm{mean},\mathrm{max}\}.
+\end{equation}
+There is no persistent edge state: each message is recomputed from the raw geometry and
+discarded after aggregation.
+
+\subsection{CTNN backflow (copresheaf)}
+\label{subsec:ctnn-backflow}
+The message-passing architecture instead maintains
+explicit \emph{node and edge} features and transports information between them through
+learned linear maps---the copresheaf-style step of \S\ref{sec:ctnn-theory}. Node features
+are embedded from the position and a spin scalar, edge features from the relative geometry,
+\begin{equation}
+  \mathbf h_i^{(0)} = W_v\,[\tilde{\mathbf x}_i,\, s_i],
+  \qquad
+  \mathbf h_{ij}^{(0)} = \mathrm{MLP}_e\!\big(\mathbf r_{ij},\, |\mathbf r_{ij}|,\, |\mathbf r_{ij}|^2\big).
+\end{equation}
+A node-to-edge transport $\rho_{v\to e}$ feeds the endpoint nodes into an edge update; an
+edge-to-node transport $\rho_{e\to v}$ returns the updated edges to the nodes, which are
+refined by a residual node update; a linear head reads out the displacement:
+\begin{align}
+  \mathbf h_{ij}' &= \mathrm{MLP}_e'\!\big(\mathbf h_{ij}^{(0)}\,\|\,\rho_{v\to e}\mathbf h_i^{(0)}\,\|\,\rho_{v\to e}\mathbf h_j^{(0)}\big),
+  \label{eq:ctnn-edge}\\
+  \mathbf m_i &= \operatorname*{Agg}_{j\neq i} w_{ij}^{\rm spin}\,\rho_{e\to v}\big(\mathbf h_{ij}'\big),
+  \label{eq:ctnn-agg}\\
+  \mathbf h_i &= \mathbf h_i^{(0)} + \mathrm{MLP}_v\!\big(\mathbf h_i^{(0)}\,\|\,\mathbf m_i\big),
+  \qquad
+  \delta\tilde{\mathbf x}_i = W_{\!\Delta}\,\mathbf h_i.
+  \label{eq:ctnn-node}
+\end{align}
+The learned transport maps $\rho_{v\to e},\rho_{e\to v}$ are the channel whose ablation
+collapses the backflow at the Wigner crystal (Chapter~\ref{ch:kernel}). The backflow uses a
+single copresheaf round; the message-passing \emph{correlator} of the architecture
+comparison (\texttt{CTNNJastrowVCycle}) iterates the same style of update over a down/up
+``V-cycle''.
+
+\subsection{Constraints, symmetries and scaling}
+\label{sec:bf-init}
+Both variants take inputs in trap units ($\tilde{\mathbf x}=\sqrt{\omega}\,\mathbf x$), bound
+the displacement, and start at the Slater nodes,
+\begin{equation}
+  \Delta_\beta(\tilde R)\;=\;\tanh\!\big(\delta\tilde X\big)\cdot s_\beta,
+  \qquad s_\beta=\mathrm{softplus}(s_\beta^{\rm raw})>0,
+  \label{eq:bf-bound-scale}
+\end{equation}
+with the last linear layer zero-initialised so that $\Delta_\beta\!\approx\!0$ initially and
+$s_\beta$ initialised in $[0.02,0.10]$. This parameterisation stabilises the SR and energy
+tails and protects the Laplacian.
+
+Near coalescence raw $1/\tilde r$ factors make $\nabla\!\cdot\!\Delta_\beta$ spiky. We
+mollify $\tilde r_{ij}$ as in \eqref{eq:bf-message} and optionally gate the message,
+\begin{equation}
+  \chi_{\rm bf}(\tilde r_{ij})=\frac{\tilde r_{ij}^2}{\tilde r_{ij}^2+r_g^2},
+  \qquad \chi_{\rm bf}(0)=\chi'_{\rm bf}(0)=0,\quad r_g\approx 0.3,
+  \label{eq:bf-gate}
+\end{equation}
+or use degree-normalised radial attention $\hat w_{ij}=w_{ij}/\sum_{k\neq i}w_{ik}$ with
+$w_{ij}=\exp[-(\tilde r_{ij}/r_c)^p]$. Either keeps the learned response smooth at contact and
+limits the backflow's contribution to the local-energy variance. The mollification scale
+$\varepsilon_{\rm bf}=10^{-6}$ is fixed, not tuned, and is a numerical guard rather
+than a modelling choice: $\sqrt{\tilde r^2+\varepsilon_{\rm bf}^2}$ differs from $\tilde r$ by
+less than $\varepsilon_{\rm bf}$ everywhere, so it changes no value the network can resolve
+and exists only to keep $\nabla\tilde r$ finite at exact coincidence. The physical short-range
+scale is instead the pair-feature softening $\varepsilon\in[0.15,0.30]$ of
+\eqref{eq:safe-feats}, four to five orders of magnitude larger.
+
+Permutation symmetry is automatic. To remove a spurious centre-of-mass drift the flow is
+projected to zero mean,
+\begin{equation}
+  \Delta_\beta \;\leftarrow\; \Delta_\beta \;-\; \frac{1}{N}\sum_{i=1}^N \Delta_{\beta,i},
+  \label{eq:bf-com}
+\end{equation}
+taken over particles within each configuration, not across the batch. Messages are
+built from relative vectors $\mathbf r_{ij}$, but the map is not translation-invariant or
+rotation-equivariant by construction, since the displacement head reads a $d$-vector from
+absolute coordinates. The two variants apply the projection at different points: the
+copresheaf network applies \eqref{eq:bf-com} inside its forward pass, while the conventional
+network returns the raw displacement and the caller projects when $\tilde R'$ is formed. The
+shifted coordinates are identical either way, but a diagnostic evaluated on a network's
+\emph{returned} field sees a centre-of-mass component in one case and not the other, which is
+why the two rank columns of \S\ref{sec:kernel-q1b} sit under ceilings differing by two.
+
+Because only the determinant is evaluated at $\tilde R'$, backflow moves the \emph{nodes}
+while the correlator exponent stays on $\tilde R$, and no Jacobian term arises. This
+Feynman--Cohen construction~\cite{FeynmanCohen1956-Backflow} targets fixed-node error
+directly; its modern quantum-Monte-Carlo form is due to Holzmann and
+Ceperley~\cite{HolzmannCeperley2003-Backflow}. Compute and memory scale as
+$O(BN^2(d+H))$ for batch size $B$ and hidden width $H$, which is what limits $N$ in practice.
+
+
+\section{Architecture sizes and hyperparameters}
+\label{sec:hyperparameters}
+Table~\ref{tab:hyperparams} collects the representative settings. The two comparisons in
+Chapter~\ref{ch:kernel} stand on different footings in this respect.
+
+The \emph{correlator} comparison is capacity-controlled. The two variants are held at
+comparable parameter counts, so a difference in outcome cannot be attributed to one simply
+being larger, and where \S\ref{sec:kernel-q1a} departs from matched capacity it does so in
+the \emph{separable} network's favour, scaling it from $20$k to $164$k parameters against a
+fixed $80$k message-passing network without closing the gap.
+
+The \emph{backflow} comparison is not. At equal width the copresheaf network is intrinsically
+the heavier object---it carries a persistent edge state where the conventional network carries
+only a per-particle aggregate---so at the shared production setting (message width $128$,
+node MLP $128\times3$) it holds $182$k parameters against $51$k, a factor of $3.6$. No
+matched backflow pair was trained. What separates architecture from capacity there is
+therefore not a matched control but the conventional network's own behaviour across
+$\omega$, which \S\ref{sec:kernel-q1b} sets out where the measurement is reported. All settings below are those of the accompanying code
+the accompanying code.
+
+\begin{table}[htbp]\centering
+\caption[Architecture and training hyperparameters]{The three sets of models trained in this
+thesis. They exist for different purposes and are never compared with one another. Widths are
+hidden dimensions; ``rounds'' are message-passing steps ($n_\downarrow{+}n_\uparrow$ for the
+V-cycle). Within the architecture study the correlator variants are not capacity-matched,
+which is why \S\ref{sec:kernel-q1a} also reports the matched $89.4$k separable network and
+the full $20$k--$164$k ladder; the backflow variants are not matched either, and cannot be at
+equal width, for the reason given above. Settings follow the accompanying code
+(\texttt{scripts/run\_depth\_analysis.py}, \texttt{scripts/source\_state\_check.py}).}
+\label{tab:hyperparams}
+\setlength{\tabcolsep}{5pt}
+\renewcommand{\arraystretch}{1.25}
+\begin{tabular}{@{}p{0.165\linewidth} p{0.335\linewidth} p{0.30\linewidth} r@{}}
+\hline
+Programme & Correlator & Backflow & Total \\
+\hline
+Physics production (\S\ref{sec:energy-overview})
+  & separable; width $128$, $2$ layers; $54$k
+  & conventional; msg $128$, node $128\times3$; $51$k & $105$k \\
+  & \emph{(as above)} & message-passing; same widths; $182$k & $236$k \\
+\hline
+Architecture study (\S\ref{sec:kernel-q1})
+  & separable; pair-MLP $64\times4$, out $32$; $47.7$k
+  & \multirow{2}{*}{\emph{as production; not matched}} & --- \\
+  & message-passing; node/edge $32$, bottleneck $16$, $2{+}2$ rounds; $79.8$k & & --- \\
+\hline
+Collocation (\S\ref{sec:kernel-mcmcfree})
+  & message-passing V-cycle; $25$k & none & $25$k \\
+  & \emph{(as above)} & copresheaf; $h_{\rm bf}{=}128$; $+24$k & $49$k \\
+\hline
+\end{tabular}
+
+\medskip
+\small\noindent Readout for every correlator: hidden $64$, $2$--$3$ layers, SiLU.
+Optimiser: Adam at $\mathrm{lr}=5\times10^{-4}$ (backflow) and $5\times10^{-5}$ (Jastrow);
+CG-SR with Tikhonov damping $\lambda$, a trust-region cap and CG restarts. Collocation batch
+$n_{\rm coll}\sim3\times10^{3}$ with oversampling $m=8$--$16$; the collocation families are
+described further in \S\ref{subsec:colloc-families}.
+\end{table}
+
+
+\paragraph{Implementation correspondence.} For replication: the separable correlator is
+\texttt{PINN} and the message-passing one \texttt{CTNNJastrowVCycle}; the conventional
+backflow is \texttt{BackflowNet}, whose $\phi_\beta$ and $\psi_\beta$ are its message and
+node MLPs, and the copresheaf backflow is \texttt{CTNNBackflowNet}, whose embeddings,
+transport maps and update MLPs realise \eqref{eq:ctnn-edge}--\eqref{eq:ctnn-node}.
+Aggregation is selectable (\texttt{sum|mean|max}); the bounded output of
+\eqref{eq:bf-bound-scale} is \texttt{out\_bound="tanh"} with
+$s_\beta=\mathrm{softplus}(\texttt{bf\_scale\_raw})$. The comparison tiers are produced by
+\texttt{scripts/run\_depth\_analysis.py} and the production widths by
+\texttt{scripts/source\_state\_check.py}. Schedule and solver options carry the names
+\texttt{alpha\_start}, \texttt{alpha\_end}, \texttt{alpha\_decay\_frac},
+\texttt{max\_param\_step}, \texttt{damping}, \texttt{micro\_batch} and \texttt{grad\_clip}.
+
+\chapter{Optimisation}
+\label{ch:optimisation}
+\label{ch:optimization}
+
+\section{Primary objective and two–stage training}
+\label{sec:opt-overview}
+
+Given a parameterised wavefunction $\Psi_\theta$, the variational ground–state energy is
+\begin{equation}
+E(\theta)
+=\frac{\langle\Psi_\theta|H|\Psi_\theta\rangle}{\langle\Psi_\theta|\Psi_\theta\rangle}
+=\mathbb{E}_{\tilde{R}\sim \pi_\theta}\!\big[E_L(\tilde{R})\big],
+\qquad
+\pi_\theta(\tilde{R})=\frac{|\Psi_\theta(\tilde{R})|^2}{\int |\Psi_\theta|^2}.
+\end{equation}
+The local energy is evaluated in \emph{physical} coordinates, consistently with the
+Hamiltonian~\eqref{eq:dot-h},
+\begin{equation}
+\label{eq:local-energy}
+E_L(R)
+= -\tfrac12\sum_{i=1}^N\!\Big[\Delta_{\mathbf r_i}\ln\Psi_\theta + \|\nabla_{\mathbf r_i}\ln\Psi_\theta\|^2\Big]
++\tfrac{1}{2}\,\omega^2\sum_{i=1}^N r_i^2
++\sum_{i<j}\frac{1}{r_{ij}},
+\end{equation}
+and the zero–variance principle holds: $\mathrm{Var}_{\pi_\theta}[E_L]=0$ iff $\Psi_\theta$ is an eigenstate.
+The network \emph{features} are computed in trap units $\tilde{\mathbf r}=\sqrt{\omega}\,\mathbf r$
+for conditioning, but the local energy itself is formed in physical units, so no
+$\omega$ factors are absorbed into the kinetic, trap, or Coulomb terms. (In trap units
+the same operator reads $E_L=\omega\big[-\tfrac12\sum_i(\Delta_{\tilde{\mathbf r}_i}\ln\Psi_\theta+\|\nabla_{\tilde{\mathbf r}_i}\ln\Psi_\theta\|^2)+\tfrac12\sum_i\tilde r_i^2\big]+\sum_{i<j}\sqrt{\omega}/\tilde r_{ij}$;
+the kinetic and trap terms scale by $\omega$ and the Coulomb term by $\sqrt{\omega}$.)
+
+Our optimisation follows two stages that mirror the implementation:
+\begin{enumerate}
+  \item \textbf{Residual–based pretraining (stage I).} We fit the residual of $E_L$ to a moving scalar target $E_{\rm eff}$ using the loss
+  \(
+    \mathcal{L}_{\rm res}(\theta)=\mathbb{E}\!\big[(E_L(\tilde R)-E_{\rm eff})^2\big].
+  \)
+  We begin with a \emph{self–target} (stabilizer) $E_{\rm eff}=\mu$ where $\mu=\mathbb{E}[E_L]$ over the current batch. This minimises the \emph{sample} variance of $E_L$ under the current collocation measure---which is not the same object as $\Var_{|\Psi|^2}(E_L)$ unless the two measures coincide---and prevents the network from chasing a potentially inaccurate external target before it can represent low–variance pockets. We then anneal toward a trusted reference $E_{\rm DMC}$ via
+  \begin{equation}
+    E_{\rm eff}(\alpha) \;=\; \alpha\,E_{\rm DMC} + (1-\alpha)\,\mu,
+    \qquad \alpha \in [0,1],
+  \end{equation}
+  with a smooth cosine schedule $\alpha=\alpha(t)$ that ramps from $\alpha_{\rm start}$ to $\alpha_{\rm end}$ over a prescribed fraction of epochs. Setting the \texttt{objective} to \texttt{"residual"} uses $E_{\rm eff}=\mu$; \texttt{"energy"} uses $E_{\rm eff}=E_{\rm DMC}$; and \texttt{"energy\_var"} uses the annealed blend above.
+  \item \textbf{Stochastic Reconfiguration (stage II).} After residual pretraining, we refine with SR (natural–gradient VMC). Writing $\bar O(\tilde R)=\partial_\theta \log\Psi_\theta(\tilde R)-\mathbb{E}_\pi[\partial_\theta\log\Psi_\theta]$ for the centred score,
+  \begin{equation}
+    S \;=\; \mathbb{E}_\pi\!\big[\bar O^\top \bar O\big],\qquad
+    g \;=\; 2\,\mathbb{E}_\pi\!\big[(E_L-\mathbb{E}_\pi[E_L])\,\bar O\big],
+  \end{equation}
+  we solve the damped normal equations
+  \begin{equation}
+    (S+\lambda I)\,\Delta\theta \;=\; -\,g,
+  \end{equation}
+  using (preconditioned) conjugate gradients with restarts, a trust–region scale on the final step, and batchwise centering/whitening of $O$.
+\end{enumerate}
+This pipeline exploits the zero–variance principle for stable shaping of $W_\theta$ (and backflow) before applying the geometry–aware SR update.
+
+\section{Configuration–space sampling}
+\label{sec:sampling}
+
+\paragraph{Guiding principle (permutation invariance).}
+In a many–body fermionic system, \emph{which} particle indices are close is irrelevant; what matters is \emph{how many} close pairs and at which length scales. Consequently, we can design samplers that (i) emphasize \emph{configurational motifs} (clusters, shells, dimers, long tails) and not specific labels, and (ii) deliberately permute particles and randomly rotate configurations to explore the space efficiently without biasing towards any ordering.
+
+\subsection{Stratified capped–simplex mixture}
+We draw collocation batches $X\in\mathbb{R}^{B\times N\times d}$ from a five–component mixture,
+\[
+\text{\small(centre, tails, mixed, shells, dimers)},
+\]
+with nonnegative weights $w\in\Delta^4$ projected to a \emph{capped simplex} $\{\,w:\, \sum_k w_k=1,\ 0\le w_k\le 0.3\,\}$ to enforce coverage.
+Each component proposes $x$ as follows (all in physical units; the code internally scales by $a_{\rm ho}=1/\sqrt{\omega}$):
+\begin{itemize}
+  \item \textbf{Centre:} narrow isotropic Gaussian around the trap centre (samples near the density core).
+  \item \textbf{Tails:} wide Gaussian (probes low–density outskirts and large–$r$ behaviour).
+  \item \textbf{Mixed:} hybrid batches mixing narrow and moderate spreads per configuration (tests robustness to inhomogeneous spreads).
+  \item \textbf{Shells:} points placed on $K$ hyperspherical shells with trap–scaled radii $\{r_k\}$ and occupancy $\{q_k\}$, with small radial/tangential jitter (captures ring/shell order at weak traps).
+  \item \textbf{Dimers:} we induce a few close pairs per configuration by sampling short interparticle offsets with random directions and log–uniform distances (enforces near–coalescence coverage without singularities).
+\end{itemize}
+We then apply a random in–plane rotation (for $d=2$), and a random permutation of particle indices; both preserve the target expectations by symmetry.
+
+\paragraph{Adaptive mixture and shell occupancy.}
+Per epoch we compute simple difficulty scores and update $w$ and $q$ by exponentiated–gradient (EG) steps with momentum, temperature, and an exploration term; $w$ is then projected back to the capped simplex. Mixture difficulty uses the residual $(E_L-E_{\rm eff})^2$ per component; shell difficulty uses a proxy
+\[
+\underbrace{V_i}_{\text{harm.+Coulomb per particle}}
+\;+\; \underbrace{\gamma_{g^2}\,\|\nabla_{\mathbf x_i}\log\Psi\|^2}_{\text{stiff gradients}}
+\;+\; \underbrace{\gamma_{\rm cusp}\,r_{\min}^{-1}}_{\text{coalescence pressure}},
+\]
+aggregated by nearest shell index. This shifts probability mass toward underfit regions \emph{without} collapsing coverage thanks to the caps.
+
+\paragraph{Hard–example injection.}
+We maintain a small buffer of previously challenging configurations (based on residuals) and stochastically inject them, with mild multiplicative and additive jitter, into the next batch. This provides a curriculum–like pressure while avoiding overfitting to outliers.
+
+\paragraph{Robustness tweaks.}
+We trim extreme local–energy outliers by quantiles (default $3\%$) \emph{before} forming losses/updates; we also micro–batch the evaluation to keep memory bounded, and apply gradient clipping to $f_\theta$ (and backflow) parameters.
+
+\section{Residual–based training (stage I)}
+\label{sec:residual-stage}
+
+For a batch $\{\tilde R_b\}_{b=1}^B$ we compute $E_L(\tilde R_b)$ and the batch mean $\mu=\frac{1}{B}\sum_b E_L(\tilde R_b)$.
+The residual loss is
+\begin{equation}
+\mathcal{L}_{\rm res}(\theta; \alpha)
+= \frac{1}{B}\sum_{b=1}^B \big(E_L(\tilde R_b)-E_{\rm eff}(\alpha)\big)^2,
+\qquad
+E_{\rm eff}(\alpha)=\alpha\,E_{\rm DMC}+(1-\alpha)\,\mu.
+\end{equation}
+\begin{itemize}
+  \item \textbf{Self–target warmup ($\alpha=0$).} Minimising $\mathbb{E}[(E_L-\mu)^2]$ is variance minimisation \emph{under the sampling measure in use}; $\mu$ is treated as a detached constant, so no gradient flows through the batch mean. It teaches the network to produce smooth, low–variance amplitudes inside nodal pockets and reduces sensitivity to early sampler noise.
+  \item \textbf{Anneal to reference ($\alpha\uparrow$).} As capacity grows, we blend in the external target, gently steering the mean energy while retaining the variance pressure. The cosine ramp avoids abrupt objective switches.
+  \item \textbf{Reference-target residual ($\alpha=1$).} Stage I may end with $E_{\rm eff}=E_{\rm DMC}$. Despite its name in the code, this is not variational energy minimisation: it is a squared residual against a fixed scalar, and it can in principle drive $\langle E_L\rangle$ \emph{up} toward a target the ansatz could beat. The variational optimisation is stage II.
+\end{itemize}
+In practice we compute $\nabla_\theta \mathcal{L}_{\rm res}$ by autodiff, use micro--batches, apply optional gradient clipping, and log per–component usage and shell radii in physical units.
+
+\paragraph{Local–energy derivatives in practice.}
+We support three Laplacian backends:
+\begin{enumerate}
+  \item \textbf{Exact:} chunked second partials (reference–accurate, heavier).
+  \item \textbf{HVP–Hutchinson:} $\Delta \log\Psi = \mathbb{E}_v[v^\top H_{\log\Psi} v]$ with Rademacher $v$ (fast and stable; fallback to FD if a probe is non–finite).
+  \item \textbf{FD–Hutchinson:} centred finite differences of directional gradients (robust in corner cases; slightly noisier).
+\end{enumerate}
+We average a small number of probes (2–16 in ablations), and trim quantiles before forming losses.
+
+\section{Stochastic Reconfiguration (stage II)}
+\label{sec:sr-stage}
+
+Stochastic reconfiguration~\cite{Sorella1998-SR,BeccaSorella2017-QMCBook} preconditions the
+energy gradient with the (inverse) quantum geometric tensor, and is the imaginary-time /
+natural-gradient step for a variational state~\cite{Amari1998-NaturalGradient,StokesEtAl2020-QuantumNaturalGradient}.
+It uses the covariance form of the energy gradient
+\begin{equation}
+\partial_{\theta_k}E
+= 2\,\mathrm{Cov}_\pi\!\big(E_L, O_k\big)
+= 2\Big(\langle E_L O_k\rangle - \langle E_L\rangle\,\langle O_k\rangle\Big),
+\end{equation}
+and approximates a natural–gradient step by solving $(S+\lambda I)\Delta\theta=-g$ with the
+quantum geometric tensor $S$ of~\S\ref{sec:theory-tangent-kernel}.
+Implementation details:
+\begin{itemize}
+  \item \textbf{Centering/whitening.} We centre $O$ per batch and whiten by the diagonal of $S$ before CG to improve conditioning.
+  \item \textbf{Trust region.} The final step is scaled to satisfy a maximum parameter norm.
+  \item \textbf{Damping.} A small $\lambda$ stabilises low--variance directions.
+\end{itemize}
+Because our backflow only alters the Slater coordinates (and $W_\theta$ stays on safe features of $\tilde R$), the SR statistics remain well–behaved even when nodes shift.
+
+\paragraph{Optimiser variants compared.}
+Three first-order updates appear in the results, and their comparison is itself a finding
+(\S\ref{sec:kernel-cond}):
+\begin{itemize}
+  \item \textbf{Adam}~\cite{KingmaBa2015-Adam}: a diagonal adaptive step, used as the
+    robust default, with separate learning rates for the Jastrow and backflow blocks.
+  \item \textbf{Plain SR}: the natural-gradient step above with a fixed diagonal damping
+    $\lambda$.
+  \item \textbf{CG-SR}: the same step solved matrix-free by preconditioned conjugate
+    gradients, with Tikhonov damping and a trust-region cap. It is most useful where $S$ is
+    anisotropic but still statistically resolved. Whether that condition holds, and what
+    follows when it does not, is \S\ref{sec:kernel-cond}.
+\end{itemize}
+Solving the SR step without forming $S$ is what makes it affordable at
+$\mathcal{O}(10^5)$ parameters. The same obstacle is addressed from the other side by the
+minSR and kernel-formulation reductions, which exploit the fact that the number of samples,
+rather than the number of parameters, sets the true rank of the
+problem~\cite{ChenHeyl2024-minSR,Rende2024-KernelSR}. Whether the extra cost buys anything
+over a diagonal preconditioner is measured in \S\ref{sec:kernel-q2}.
+
+\section{Sampling paradigms and the weak-form collocation objective}
+\label{sec:method-collocation}
+The alternative pipeline described in this section draws its batches from an analytic
+proposal rather than a Markov chain---the SR route of \S\ref{sec:sr-stage} samples
+$|\Psi_\theta|^2$ by Metropolis---so the choice of \emph{sampling measure} must be stated
+explicitly: the results treat it as a variable in its own right. Two paradigms appear in this
+thesis. In \emph{variational Monte Carlo} (VMC) the batch is drawn from
+$|\Psi_\theta|^2$ itself, usually by a Metropolis chain, so the estimators of the QGT
+and of the gradient share the very metric they are meant to precondition. In
+\emph{collocation} the batch is drawn from a fixed analytic proposal $q(\mathbf R)$ and
+reweighted to $|\Psi_\theta|^2$ by importance weights
+$w_i=|\Psi_\theta(\mathbf R_i)|^2/q(\mathbf R_i)$, so that the gradient training requires no
+Markov chain. A Metropolis probe is used only outside the gradient loop---for periodic
+checkpoint selection and for the final energy certification.
+
+For the collocation objective we use a \emph{weak form}: the local energy $E_L$ enters
+only as a reward in a score-function (REINFORCE) gradient~\cite{Williams1992-REINFORCE},
+\begin{equation}
+  \nabla_\theta \langle E\rangle
+  = 2\,\mathbb{E}_{\mathbf R\sim|\Psi_\theta|^2}\!\big[(E_L(\mathbf R)-b)\,
+    \nabla_\theta \log|\Psi_\theta(\mathbf R)|\big],
+  \label{eq:reinforce-method}
+\end{equation}
+with a variance-reducing baseline $b$ (a running mean of $E_L$), and the Laplacian inside
+$E_L$ is never differentiated through. This is deliberate. Differentiating the Laplacian
+through a backflow-shifted determinant is the source of the nodal instability analysed in
+Appendix~\ref{app:catch22}; the weak form keeps the full local-energy signal as a reward
+while sidestepping that pathology. Two robustness controls stabilise the reward: local
+energies are clipped to a robust median/MAD location--scale band ($\sim\!5\sigma$), and the
+most extreme rewards are quantile-trimmed before the gradient is formed.
+
+\subsection{Analytic proposal and importance resampling}
+\label{subsec:colloc-proposal}
+The collocation points are drawn from an analytic mixture of isotropic Gaussians centred at
+the trap minimum and reweighted to $|\Psi_\theta|^2$~\cite{KalosLevesqueVerlet1974-ImportanceSampling},
+\begin{equation}
+  q(\mathbf R)=\frac{1}{K}\sum_{k=1}^{K}\mathcal N\!\big(\mathbf R;\,0,\,\sigma_{f,k}^2/\omega\;I_{Nd}\big),
+  \quad \sigma_f\in\{0.8,1.3,2.0\},
+  \qquad
+  w_i=\frac{|\Psi_\theta(\mathbf R_i)|^2}{q(\mathbf R_i)},
+  \label{eq:colloc-proposal}
+\end{equation}
+where the $1/\omega$ scaling ties the proposal width to the oscillator length
+$\ell=1/\sqrt\omega$ and the three components cover core, bulk, and tails. A batch of
+$n_{\rm coll}$ points is obtained by multinomial resampling on $p_i=w_i/\sum_j w_j$ from
+$m\,n_{\rm coll}$ candidates ($m\!\approx\!8$--$16$). Reweighting quality is tracked by the
+effective sample size $\mathrm{ESS}=(\sum_i w_i)^2/\sum_i w_i^2$ and, as a heavier-tailed
+diagnostic, the Pareto shape parameter $\hat k$ of the
+weights~\cite{Vehtari2024}. The second is not a second opinion on the first. Importance
+weights are heavy-tailed, and $\hat k$ estimates the tail index of the generalised Pareto
+distribution fitted to the largest of them. The thresholds are statements about the
+moments of the \emph{fitted} tail. For $\hat k<1/2$ the weights behave as though the
+variance were finite and the reweighted estimator obeys a central limit theorem. Between
+$1/2$ and $1$ the variance behaves as infinite though the mean does not, and convergence is
+slow enough that $\hat k\approx0.7$ is the practical limit of trustworthiness. Above $1$ the
+fitted tail has no finite mean.
+
+That last statement needs care, because in this setting the underlying ratio does have a
+finite mean by construction: $w=|\Psi_\theta|^2/q$ with $q$ a proper density gives
+$\mathbb{E}_q[w]=\int|\Psi_\theta|^2<\infty$ whenever $\Psi_\theta$ is square-integrable, so
+asymptotically $\hat k<1$. A measured $\hat k>1$ is therefore a \emph{finite-sample}
+diagnostic: it says the sample is deep in a pre-asymptotic regime where the realised
+estimator behaves as if no finite mean existed, not that the expectation fails to exist
+\cite{Vehtari2024}. We use it in that sense throughout. An ESS can look survivable while $\hat k$ says the
+estimator has no variance to speak of, which is why we track both. Both degrade when $q$
+ceases to overlap $|\Psi_\theta|^2$, and that degradation is the failure mode which bounds
+the paradigm at large $N$ and weak $\omega$ (Chapter~\ref{ch:kernel},
+\S\ref{sec:colloc-reliability}). Three controls manage the tails: weight tempering ($w\!\to\!w^{\alpha}$, $\alpha<1$),
+log-weight clipping at an upper quantile, and ESS-adaptive oversampling that raises $m$ when
+the achieved ESS falls below a floor. The first two are deliberate bias--variance trades:
+they change the distribution the reward is averaged over, so the reweighted energy readout is
+no longer an estimate of $\langle E_L\rangle_{|\Psi_\theta|^2}$. That is why the final
+certification is always a separate evaluation under $|\Psi_\theta|^2$
+(\S\ref{sec:kernel-cond}). An instability-rollback reverts to the
+last good checkpoint and decays the learning rate if the energy jumps beyond a threshold.
+
+\subsection{Physics-informed proposal for the Wigner regime}
+\label{subsec:colloc-wigner}
+The origin-centred proposal~\eqref{eq:colloc-proposal} places its mass where a Wigner
+molecule has almost none: at strong correlation the density collapses onto a shell at the
+classical ring radius $r_0$, and $|\Psi_\theta|^2$ has essentially no support near the
+origin, so the ESS collapses. We therefore replace $q$ by a proposal built from the Wigner
+shell itself---a radial Gaussian centred at $r_0$ (set by balancing confinement against
+Coulomb repulsion) times an angular distribution over the ring, so that proposed
+configurations resemble electrons spread around the ring instead of clustered at the centre.
+Where the ring itself develops angular structure the uniform angular factor is replaced by a
+Dirichlet model of the angular gaps. Difficult confinements are reached by \emph{cascade
+warm-starting}: parameters converged at one $\omega$ initialise the next, following
+$\omega:1.0\!\to\!0.5\!\to\!0.1\!\to\!0.01\!\to\!0.001$. What this construction achieves,
+and where it stops, is \S\ref{sec:kernel-q3-frontier}.
+
+\subsection{Ansatz families used in the collocation programme}
+\label{subsec:colloc-families}
+Three ansatz families are trained under this objective in Chapter~\ref{ch:kernel}, all on
+the same Slater--Jastrow core $\Psi(\mathbf R)=\det[\phi_i(\mathbf r_j+\Delta\mathbf r_j)]\,e^{J(\mathbf R)}$
+and differing only in what dresses it. They are deliberately smaller than the production
+networks of \S\ref{sec:hyperparameters}, because this programme is limited by gradient noise and memory, not by capacity.
+
+\emph{Jastrow-only.} The correlator alone at ${\sim}25$k parameters, in its
+message-passing form (\texttt{CTNN\-Jastrow\-VCycle}), acting on node features
+(single-particle orbital values) and edge features (soft-core pair distances). It is used
+both standalone and as the initialiser for the backflow runs.
+
+\emph{Backflow $+$ Jastrow.} Adds the copresheaf displacement network
+(\texttt{CTNNBackflowNet}), ${\sim}49$k parameters in total at $h_{\rm bf}{=}128$. Its edge
+tensor scales as $\mathcal O(N^2 h_{\rm bf})$, which is the memory bottleneck at large $N$:
+at $N{=}20$ the hidden width must be cut to $h_{\rm bf}\in\{48,64\}$.
+
+\emph{Neural Pfaffian.} Replaces the determinant with $\mathrm{Pf}[A_{ij}]$, a more general
+antisymmetric form admitting richer nodal topology~\cite{GaoGuennemann2024-NeuralPfaffian}.
+
+\section{Units, scaling, and batch construction}
+\label{sec:units-scaling}
+
+All features are computed in trap units $\tilde{\mathbf x}=\sqrt{\omega}\,\mathbf x$ so that length scales and gates (e.g.\ the short–range gate in the NQS and backflow) behave consistently across $\omega$. The sampler internally widens/narrows Gaussians and shell radii using $a_{\rm ho}=1/\sqrt{\omega}$ in a fixed, explicit way, so that the five components cover comparable \emph{dimensionless} regimes for $\omega\in[0.01,1]$. Proposal candidates are drawn independently, so the batch carries no serial Markov-chain autocorrelation; the retained batch is not i.i.d.\ in the strict sense, since multinomial resampling can repeat candidates and the hard-example buffer reinjects earlier ones. What the design buys is the absence of a mixing time, not statistical independence.
+
+\section{The two workflows}
+\label{sec:opt-summary}
+
+Both routes start from the same ansatz and end at an energy evaluated under
+$|\Psi_\theta|^2$. They differ in the measure that defines the loss in between.
+\begin{center}\small
+\begin{tabular}{@{}ll@{}}
+\textbf{SR--VMC (\S\ref{sec:residual-stage}--\S\ref{sec:sr-stage})} &
+\textbf{Collocation (\S\ref{sec:method-collocation})}\\[2pt]
+stratified mixture $\to$ residual pretraining &
+pretrained checkpoint\\
+$\downarrow$ & $\downarrow$\\
+$|\Psi_\theta|^2$ sampling (Metropolis) &
+analytic proposal $q$, importance reweighting\\
+$\downarrow$ & $\downarrow$\\
+SR step $(S+\lambda I)\Delta\theta=-g$ &
+weak-form REINFORCE gradient (Adam)\\
+$\downarrow$ & $\downarrow$\\
+energy under $|\Psi_\theta|^2$ &
+Metropolis probe for checkpoint choice,\\
+ & then energy under $|\Psi_\theta|^2$\\
+\end{tabular}
+\end{center}
+The right-hand route places no Markov chain in any gradient; the probe that selects its
+checkpoints sits outside the update loop entirely. The left-hand route, which carries the
+ground-state energies of \S\ref{sec:energy-overview}, keeps the early dynamics
+variance-dominated and sampler-aware and then transitions to a geometry-aware
+natural-gradient refinement---a division that matters most at weak traps, where the shell and
+dimer coverage of the stratified mixture is what makes the early stage converge at all.
+
+\section{Statistical uncertainties}
+\label{sec:uncertainties}
+Every energy and observable we report carries a statistical error, and two distinct sources
+contribute. Within a single evaluation, successive MCMC samples are autocorrelated, so a
+naive standard error over $B$ samples understates the sampling uncertainty; this is what
+blocking addresses. Across training runs, the optimisation is itself stochastic and lands on
+different states from different seeds; blocking says nothing about that, and it is assessed
+separately by repeating runs at independent seeds wherever the claim depends on it
+(\S\ref{sec:colloc-reliability}, \S\ref{sec:kernel-q1a}). We therefore
+estimate the error on a scalar mean $\bar A=\frac1B\sum_i A(\mathbf R_i)$ by
+\emph{blocking}: successive samples are averaged into blocks of growing size and the
+plateau of the block standard error as the block size exceeds the autocorrelation time is
+taken as the uncertainty~\cite{FlyvbjergPetersen1989-Blocking,Jonsson2018-BlockingSE}. For
+the final ground-state energy this is the dominant reported error; a parenthetical digit,
+e.g.\ $155.8738(7)$, denotes one standard error on the last quoted figure.
+
+For quantities that are \emph{nonlinear} functions of sample statistics (participation ratios, effective ranks, PCA cosines, and the coupling diagnostics of Chapter~\ref{ch:results}) a blocked standard error is not available in closed form, and we
+use a \emph{block bootstrap} instead: blocks (of the plateau size above) are resampled with
+replacement, the statistic is recomputed on each resample, and its spread across resamples
+is the reported error~(\S\ref{subsec:repr-uncertainty}). Where a number is quoted as a
+seed average, we additionally report the spread across independent random seeds, which captures optimisation variability and not only sampling variability; the two are distinguished in the
+captions. Reference energies drawn from the literature carry the uncertainties quoted by
+their sources.
+
+\chapter{Analysis}
+\label{ch:analysis}
+
+This chapter describes \emph{what} we measure on fresh $|\Psi_\theta|^2$ samples, \emph{how} we compute the diagnostics, and \emph{why} each quantity is informative. Results and numbers are presented in Chapter~\ref{ch:results}.
+\section{Structural diagnostics and Wigner markers}
+\label{sec:analysis-struct}
+
+Unless stated otherwise, curves are accumulated in \emph{trap units} 
+$\mathbf{y}=\sqrt{\omega}\,\mathbf{x}$ to compare shapes across $\omega$, 
+while all headline distances are reported in \emph{Bohr} (physical units $\mathbf{x}$).
+Production chains are thinned; we split samples into halves for stability checks 
+(acceptance window, JSD between halves, and reproducibility under restarts).
+Using trap units to compare shapes across confinements is standard in parabolic dots; 
+see the overview in~\cite{manninen2007metalclustersquantumdots}.
+
+\subsection{Pair distribution and radial statistics}
+\label{subsec:gr-pr}
+
+We estimate an \emph{effective} pair distribution---a shell-area-corrected pair-distance
+density---in trap units. For a finite trapped dot there is no homogeneous-system
+normalisation, because the one-body density varies strongly across the cloud, so $A_{\rm eff}$
+below is a finite-dot convention rather than a thermodynamic volume and $g(r)$ does not tend
+to unity at large $r$. Peak positions and relative profiles, which is what the analysis uses,
+are insensitive to that choice; absolute amplitudes are not.
+\begin{equation}
+g(r_\alpha)\;=\;\frac{A_{\mathrm{eff}}}{N(N-1)}\;
+\frac{\big\langle\sum_{i<j}\mathbf{1}\{r_{ij}\!\in[r_\alpha^-,r_\alpha^+)\}\big\rangle}
+{2\pi r_\alpha\,\Delta r_\alpha},
+\qquad r_{ij}=\|\mathbf{y}_i-\mathbf{y}_j\|_2,
+\end{equation}
+with $A_{\mathrm{eff}}=\pi R_{0.95}^2$ and $R_{0.95}$ the 95\% quantile of single‐particle radii in trap units.
+This $g(r)$-based structural analysis follows established practice in mesoscopic 2D electron systems
+and quantum dots~\cite{Filinov_2001,Egger_1999,manninen2007metalclustersquantumdots}.
+The pair-distance probability is therefore denoted
+\(
+P_{\rm pair}(r_{ij})\propto r_{ij}^{d-1}g(r_{ij})
+\).
+It is used for pair-structure diagnostics, distinct from the one-body radial
+probability
+\(
+P_1(r)\propto r\rho_1(r)
+\),
+from which we report the headline mode $r_{\mathrm{mode}}$, mean $\bar r$,
+standard deviation $\sigma_r$, and FWHM (all in Bohr). A compact one-body
+width-to-scale marker is
+\begin{equation}
+\gamma \;=\; \sigma_r / r_{\mathrm{mode}},
+\label{eq:gamma}
+\end{equation}
+which tracks the width of $P_1$ relative to its modal radius. It is interpreted
+alongside shell separation and pair/angular diagnostics, rather than as a
+universal monotone Wigner marker~\cite{Egger_1999,Filinov_2001}.
+
+\subsection{Automatic shell detection and topologies}
+\label{subsec:shells}
+
+For each frame we sort the single‐particle radii $s_1\le\cdots\le s_N$ (trap units), compute gaps
+$g_k=s_{k+1}-s_k$, and flag the frame as \emph{two‐shell} if the largest gap exceeds a robust threshold:
+\begin{equation}
+\max_k g_k \;\ge\; \tau\,\mathrm{median}(g_k),
+\qquad \tau\in[2.5,3.5]\ \text{(default 3.0)}.
+\end{equation}
+The cut radius is the midpoint of the maximal gap; the inner multiplicity $n_{\mathrm{in}}$ defines the topology 
+$(n_{\mathrm{in}}, N-n_{\mathrm{in}})$.
+
+\paragraph{More than two shells.} At $N{=}20$ and weak confinement a single cut is not
+enough, and the detector is applied recursively. Having placed one cut, we re-apply the same
+robust-gap test \emph{within} each resulting group, accepting a further cut only if that
+group contains at least three particles and its own maximal gap again exceeds
+$\tau\,\mathrm{median}(g_k)$ computed over the whole frame---so the threshold is global and
+a shell is never split by a gap that is small on the scale of the configuration. Recursion
+stops when no group qualifies, which for the systems here never yields more than three
+shells. A frame is labelled by the resulting occupancy vector
+$(n_1,\dots,n_S)$ ordered outward, so that the two-shell case above is the $S{=}2$ member of
+the same family; the $N{=}20$ deep-Wigner topology $(1,7,12)$ is an $S{=}3$ assignment with
+cuts after the first and eighth particle. Topology fractions and their robustness under
+$\tau$ are reported exactly as in the two-shell case.
+Shelling and discrete ring occupancies are well known in parabolic Coulomb clusters
+and quantum dots~\cite{schweigert1994spectralpropertieschargedparticles,Kong_2002,manninen2007metalclustersquantumdots};
+our detector provides a reproducible, data-driven assignment in that spirit.
+We report:
+(i) the fraction of two‐shell frames,
+(ii) the histogram over $n_{\mathrm{in}}$ among two‐shell frames,
+and (iii) for selected topologies (e.g.\ $(1,5)$ or $(3,9)$) the fraction among \emph{all} frames.
+
+\paragraph{Shell‐resolved reconstruction of $g(r)$.}
+On two‐shell frames we decompose pairs into II, IO, and OO and accumulate histograms
+$g_{\mathrm{II}},g_{\mathrm{IO}},g_{\mathrm{OO}}$. With empirical weights
+$w_{\mathrm{II}},w_{\mathrm{IO}},w_{\mathrm{OO}}$ (combinatorial counts) we reconstruct
+\(\tilde g(r)=w_{\mathrm{II}}g_{\mathrm{II}}+w_{\mathrm{IO}}g_{\mathrm{IO}}+w_{\mathrm{OO}}g_{\mathrm{OO}}\)
+and report $\cos\angle(g,\tilde g)$.
+Values $\approx 1$ indicate that the observed $g(r)$ shape is explained by shell geometry, not sampling artefacts,
+in line with shell-based descriptions in~\cite{schweigert1994spectralpropertieschargedparticles,Kong_2002,manninen2007metalclustersquantumdots}.
+
+\subsection{Orientational order and “ring stiffness”}
+\label{subsec:orient}
+
+On each detected ring (inner or outer) we take the particle angles $\{\phi_k\}_{k=1}^n$ in
+the lab frame. No rotation is removed at this stage: the modulus $|\Phi_m|$ below is already
+invariant under a global rotation, and the registration of Eq.~\eqref{eq:Ctilde} is applied
+only where the \emph{phase} is needed, which is the cross-shell comparison.
+Bond‐orientational order is
+\begin{equation}
+\Phi_m \;=\; \frac{1}{n}\sum_{k=1}^n e^{\,\mathrm{i} m \phi_k},
+\qquad m=n,
+\end{equation}
+so that $|\Phi_m|\in[0,1]$ measures $n$‐fold orientational order (e.g.\ $m{=}5$ for $(1,5)$, $m{=}9$ for the outer ring of $(3,9)$),
+analogous to standard bond–orientational order parameters used in 2D Coulomb/Yukawa crystals~\cite{Mazars_2008}.
+As a complementary, dimensionless \emph{angular Lindemann} number we use
+\begin{equation}
+\lambda_\phi \;=\; \frac{\mathrm{std}(\Delta\phi)}{\mathbb{E}[\Delta\phi]},
+\qquad 
+\Delta\phi\;=\;\text{nearest‐neighbour angular spacing on the ring}.
+\end{equation}
+Smaller $\lambda_\phi$ indicates a stiffer (more Wigner‐like) ring. This is the quantity
+abbreviated ``Lind'' in Chapter~\ref{ch:results}; where a shell index is attached, as in
+$\lambda_{\rm in}$ and $\lambda_{\rm out}$, it is the same estimator evaluated on that
+shell alone.
+
+\paragraph{Registered and lab-frame order.}
+Two further scalars are used for the multi-shell cases, and both are needed because
+$|\Phi_{n_s}|$ is defined shell by shell while the question at $N{=}20$ is whether the
+\emph{molecule} is ordered. For a frame with shells $s=1,\dots,S$ and occupancies $n_s$ we
+define a configuration-level order parameter in two frames. In the \emph{lab} frame,
+\begin{equation}
+  C_{\rm global} \;=\; \Big|\;\Big\langle \tfrac{1}{S'}\textstyle\sum_{s:\,n_s\ge3}
+  \Phi_{n_s}\Big\rangle_{\rm frames}\Big| ,
+  \label{eq:Cglobal}
+\end{equation}
+the modulus of the \emph{frame-averaged} complex order parameter, averaged over the
+$S'$ shells carrying at least three particles. Because a freely rotating molecule visits all
+orientations, the complex phases cancel and $C_{\rm global}\to0$ however ordered the
+molecule is internally: it measures \emph{pinning} to the lab frame, not order. In the \emph{co-rotating}
+frame each configuration is first registered by an estimated physical rotation. Because a
+rigid rotation by $\alpha$ sends $\Phi_{n_s}\mapsto e^{in_s\alpha}\Phi_{n_s}$, the phase of a
+shell's order parameter advances at $n_s$ times the rotation angle, and the angle itself must
+be recovered from the outermost shell as
+$\hat\alpha=\arg\Phi_{n_S}/n_S$ (modulo $2\pi/n_S$) before it can be applied to the others:
+\begin{equation}
+  \tilde C_{\rm global} \;=\; \Big|\;\Big\langle \tfrac{1}{S'}\textstyle\sum_{s:\,n_s\ge3}
+  \Phi_{n_s}\,e^{-i n_s\hat\alpha}\Big\rangle_{\rm frames}\Big| ,
+  \qquad \hat\alpha=\frac{\arg\Phi_{n_S}}{n_S}.
+  \label{eq:Ctilde}
+\end{equation}
+Dividing the outer phase by $n_S$ is essential: removing $\arg\Phi_{n_S}$ from every shell
+alike would only correspond to a common spatial rotation when all occupancies coincide, and
+would otherwise mix shells that rotate together into an apparent misalignment.
+This retains the \emph{relative} angular arrangement of the shells while discarding the
+global orientation, so a rigid molecule tumbling freely gives $\tilde C_{\rm global}$ near
+its single-frame value and $C_{\rm global}$ near zero. The pair
+$(\tilde C_{\rm global}, C_{\rm global})$ is therefore the direct test of the rotating
+Wigner-molecule picture, and it is reported that way in \S\ref{sec:wigner-angular}.
+Finally, $L_{n,\rm reg}$ denotes the angular Lindemann number $\lambda_\phi$ evaluated on
+the shell of occupancy $n$ after the same registration.
+
+Two of these quantities are insensitive to the registration convention and one is not, and
+the distinction bounds what may be concluded from each. The shellwise modulus
+$|\Phi_{n_s}|$ and the nearest-neighbour spacing statistics behind $\lambda_\phi$ are
+invariant under any global rotation, so they carry no dependence on how $\hat\alpha$ is
+estimated. The \emph{cross-shell} quantity $\tilde C_{\rm global}$ does depend on it, since
+its whole content is the relative alignment between shells of different occupancy. The
+$N{=}20$ values reported in \S\ref{sec:wigner-angular} were produced by an earlier analysis
+pass whose code has not been retained, so we cannot confirm which convention it used; the
+per-shell numbers there are unaffected, but the cross-shell $\tilde C_{\rm global}$ should be
+recomputed under Eq.~\eqref{eq:Ctilde} before it is relied on quantitatively.
+
+\paragraph{The random-angle null.}
+None of these is interpretable without a baseline. For $n$ particles at independent uniform
+angles, $\Phi_n$ is a two-dimensional random walk of $n$ unit steps, so
+$\langle|\Phi_n|\rangle=\sqrt\pi/(2\sqrt n)\approx0.886/\sqrt n$ and
+$\langle|\Phi_n|^2\rangle=1/n$. A five-particle ring with no angular order whatever returns
+$|\Phi_5|\approx0.40$. We therefore report $|\Phi_n|$ together with its ratio to this null
+wherever the ordering claim depends on it (Appendix~\ref{app:structural-tables:shells}).
+This is a Lindemann–type orientational metric tailored to finite rings, motivated by
+the use of Lindemann criteria to diagnose intershell rotational (angular) melting in mesoscopic
+Coulomb clusters and dots~\cite{schweigert1994spectralpropertieschargedparticles,Filinov_2001}.
+
+\subsection{Scaling check for $N=2$}
+\label{subsec:n2-scaling}
+
+To connect with the classical strong‐coupling limit we fit 
+\begin{equation}
+r_{\mathrm{mode}}(\omega) \;=\; C\,\omega^{\alpha}
+\end{equation}
+by linear regression in $\big(\log\omega,\log r_{\mathrm{mode}}\big)$ and compare the slope with the classical reference 
+$\alpha_{\mathrm{cl}}=-2/3$ (two charges in a harmonic trap at strong coupling; see, e.g., the reviews in~\cite{manninen2007metalclustersquantumdots}).
+Approach toward $\alpha_{\mathrm{cl}}$ as $\omega\downarrow$ is one of our Wigner crossover indicators,
+consistent with the crossover phenomenology reported in~\cite{Egger_1999,Filinov_2001}.
+
+\subsection{Reporting and stability checks}
+\label{subsec:analysis-sanity}
+
+For all scalars and histograms we report standard errors calculated over thinned blocks or frames.
+We verify: 
+(i) acceptance in the target window, 
+(ii) Jensen–Shannon divergence and $\ell_2$ distance between halves of production (stationarity),
+(iii) robustness of topology fractions and $|\Phi_m|$ under $\tau\in[2.5,3.5]$ and mild pre‐smoothing of radii, and
+(iv) reproducibility of $g(r)$ and $P(r)$ under independent sampler restarts.
+All diagnostics operate directly on saved bundles 
+$\{\mathbf{X}_{\mathrm{Bohr}},\,r,\,g(r)\}$.
+
+\section{Representation analysis}
+\label{sec:repr-methods}
+
+We probe what the networks learn by evaluating fixed, trained models on fresh
+$|\Psi_\theta|^2$ samples. Unless stated otherwise, features are computed in \emph{trap units}
+$\mathbf{y}=\sqrt{\omega}\,\mathbf{x}$ to match the correlator’s internal scaling.
+All estimates use thinned MCMC frames, split into two equal blocks $A$ and $B$;
+PCA fits on $A$ and reports on $B$ (and vice versa) to avoid circularity. 
+We use \texttt{float64} throughout.
+
+\paragraph{Feature taps.}
+Let $z_\theta\in\mathbb{R}^D$ denote the concatenated correlator representation
+\[
+z_\theta=\big[\overline{\phi}\;\big|\;\overline{\psi}\;\big|\;\mathbf{g}\big],
+\]
+where $\overline{\phi}$ are per-particle summaries, $\overline{\psi}$ are pairwise summaries,
+and $\mathbf{g}$ are global/extras. The readout $\rho_\theta$ is a two-layer MLP, not a linear
+map, so
+\begin{equation}
+f_{\rm base}(z)=\rho_\theta(z),
+\qquad
+f=f_{\rm base}+f_{\rm cusp},
+\end{equation}
+and the ablations below re-evaluate $\rho_\theta$ on modified inputs instead of manipulating a weight vector.
+Backflow returns a displacement field $\Delta x\in\mathbb{R}^{N\times d}$ that enters only the
+Slater determinant; the correlator and cusp are evaluated on the unshifted $\tilde R$
+(\S\ref{subsec:backflow-method}). The coupling diagnostics below additionally probe the
+correlator on the shifted coordinates as a counterfactual sensitivity.
+
+\subsection{Representation geometry}
+\paragraph{Preprocessing and PCA.}
+\label{subsec:repr-prep}
+Given a sample matrix $Z\in\mathbb{R}^{K\times D}$ (rows are frames), we \emph{mean-centre}
+the columns, $Z_c=Z-\mu$, and take the SVD of $Z_c$ to obtain orthonormal loadings
+$U=[u_1,\dots,u_D]$; scores are $S=Z_cU$. Centring but not rescaling is deliberate: the
+readout $\rho_\theta$ was trained on the raw features, so every ablation below is performed
+in raw coordinates and the mean is restored before $\rho_\theta$ is applied. Where a
+per-column standardisation is used---for the branch-power decomposition of
+\S\ref{subsec:repr-pc1-power}, which compares loadings across branches carrying different
+natural scales---it is stated explicitly. PCA is fitted on block $A$ and reported on the
+held-out block $B$ unless noted.
+
+\paragraph{Entropy effective rank.}
+\label{subsec:repr-erank}
+Let $\{\lambda_i\}_{i=1}^D$ be the eigenvalues of $\mathrm{Cov}(Z_c)$
+(on the held-out block). With $p_i=\lambda_i/\sum_j\lambda_j$, the
+\emph{entropy effective rank} is
+\[
+r_{\rm eff}(Z)\;=\;\exp\!\Big(-\sum_{i=1}^D p_i\log p_i\Big),
+\]
+which equals $1$ for perfectly one-dimensional representations and increases
+with spectral spread. Two spectral counts appear in this thesis and they are not the same
+number. $r_{\rm eff}=\exp(H_1)$ above is the exponential of the Shannon entropy of the
+spectrum; the \emph{participation ratio}
+$d_{\rm eff}=(\sum_a\lambda_a)^2/\sum_a\lambda_a^2$ of \S\ref{sec:theory-tangent-kernel} is
+the exponential of the R\'enyi-2 entropy. Since R\'enyi entropies decrease in their order,
+$d_{\rm eff}\le r_{\rm eff}$ always, with equality only for a flat spectrum. Appendix~\ref{app:representation}
+reports $r_{\rm eff}$ for feature covariances and Chapter~\ref{ch:kernel}
+reports $d_{\rm eff}$ for the tangent metric and for the displacement field, so the same
+object can carry two slightly different counts in the two chapters; each table names which
+is used.
+
+\subsection{Probes and ablations}
+\paragraph{Principal-component ablations of the head.}
+\label{subsec:repr-pc-ablate}
+To test how many latent axes the readout truly uses, we project the centred features onto
+the top-$k$ PCs and restore the mean before re-evaluating the trained readout \emph{without
+refitting},
+\begin{equation}
+\Pi_k=\sum_{i=1}^k u_i u_i^\top,
+\qquad
+z^{(k)}=\mu+\Pi_k\,(z-\mu),
+\qquad
+\hat f^{(k)}=\rho_\theta\big(z^{(k)}\big).
+\label{eq:pc-ablation}
+\end{equation}
+Restoring $\mu$ matters: $\rho_\theta$ is a nonlinear map trained on uncentred inputs, so
+feeding it a centred or standardised vector would evaluate it off its training domain and
+the resulting error would measure that displacement rather than the loss of PC content. As a
+null, the same projection is repeated onto $k$ \emph{random} orthonormal directions and the
+two error curves are compared; a top-$k$ curve that is not below the random-$k$ curve would
+mean the leading PCs carry no privileged information for the readout.
+We report a \emph{normalised} error on block $B$,
+\[
+\mathrm{rel\text{-}MAE}(k)\;=\;
+\frac{\mathbb{E}_B\,|\,\hat f^{(k)}-f_{\rm base}\,|}
+     {\mathrm{std}_B(f_{\rm base})},
+\]
+together with the learning curve in $k$.
+
+\paragraph{PC1 block-power decomposition.}
+\label{subsec:repr-pc1-power}
+To attribute the leading axis to branches, we partition $u_1$ conformably with
+$z=[\overline{\phi}\,|\,\overline{\psi}\,|\,\mathbf{g}]$ and report
+\[
+\text{power}(\overline{\phi})=\frac{\|u_{1,\overline{\phi}}\|_2^2}{\|u_1\|_2^2},
+\quad
+\text{power}(\overline{\psi})=\frac{\|u_{1,\overline{\psi}}\|_2^2}{\|u_1\|_2^2},
+\quad
+\text{power}(\mathbf{g})=\frac{\|u_{1,\mathbf{g}}\|_2^2}{\|u_1\|_2^2}.
+\]
+These are computed on standardised features so that branches carrying different natural
+scales are comparable. One confound remains and should be kept in mind when reading them: a
+branch holding $d_b$ of the $D$ coordinates would already carry about $d_b/D$ of the squared
+loading mass under an isotropic random direction, so a large share partly reflects a wide
+branch. The shares below are therefore read as \emph{relative} shifts across $\omega$ at
+fixed architecture---where the branch widths are constant and the confound cancels---and not
+as absolute statements that one branch dominates.
+
+\paragraph{Linear probes to coarse physics.}
+\label{subsec:repr-probes}
+We regress interpretable summaries per configuration on the first $k$ PC scores $S^{(k)}$ using
+ridge regression (tiny penalty $\alpha=10^{-6}$):
+\[
+y \approx S^{(k)} \beta,\qquad 
+y\in\big\{\bar r,\ \mathrm{Var}(r),\ \Pr(r<r_0),\ \text{shell\ contrast}\big\}.
+\]
+We report $R^2$ on the held-out block; $r_0$ is a fixed near-contact cutoff in trap units.
+
+\paragraph{Near-field gradient concentration.}
+\label{subsec:repr-nearfield}
+For each frame we compute the minimum pair distance $r_{\min}$ (trap units) and the gradient
+of the residual head with respect to particle coordinates, $\nabla f_{\rm base}(\mathbf{y})$.
+The quantity reported is an \emph{enrichment factor}: the mean gradient power among the
+closest-contact frames divided by the mean over all frames,
+\begin{equation}
+\mathcal{E}(q)\;=\;
+\frac{\mathbb{E}\big[\,\|\nabla f_{\rm base}\|_2^2 \;\big|\; r_{\min}\le Q_q\,\big]}
+     {\mathbb{E}\big[\|\nabla f_{\rm base}\|_2^2\big]},
+\label{eq:nf-enrichment}
+\end{equation}
+with $Q_q$ the $q$-quantile of $r_{\min}$. This is a ratio of a \emph{conditional} mean to an
+unconditional one and is therefore unbounded above, unlike an indicator-weighted mass
+fraction, which could not exceed unity. $\mathcal{E}\approx1$ means gradient power is spread
+in proportion to frame count, so the analytic cusp is handling most short-range structure;
+$\mathcal{E}\gg1$ means residual stiffness is concentrated near contact.
+
+\subsection{Backflow--correlator coupling}
+\paragraph{Backflow geometry and energy-locality shares.}
+\label{subsec:repr-bf}
+
+\paragraph{Field spectrum.}
+We vectorize the backflow displacement per frame,
+$\delta=\mathrm{vec}(\Delta x)\in\mathbb{R}^{Nd}$, standardize across frames,
+and compute the entropy effective rank $r_{\rm eff}(\Delta x)$ of
+Sec.~\ref{subsec:repr-erank}. Chapter~\ref{ch:kernel} reports the participation ratio of
+the same spectrum instead, which is the smaller of the two counts; the ceiling
+$2N-d$ set by the zero-mean projection~\eqref{eq:bf-com} is common to both.
+
+\paragraph{Where backflow acts.}
+On the same thinned frames we evaluate local energies with and without backflow,
+$E_{\rm loc}^{\rm BF}$ and $E_{\rm loc}^{\rm noBF}$, using the \emph{same} coordinates.
+We form the signed correction $\Delta E_{\rm loc}=E_{\rm loc}^{\rm BF}-E_{\rm loc}^{\rm noBF}$ and report
+near-field shares at quantile $q$ of $r_{\min}$:
+\[
+\mathrm{NF}\text{-}\Delta E(q)\;=\;
+\frac{\mathbb{E}\big[|\Delta E_{\rm loc}|\,\mathbf{1}\{r_{\min}\le Q_q\}\big]}
+     {\mathbb{E}\big[|\Delta E_{\rm loc}|\big]}.
+\]
+(Using absolute values isolates magnitude; signed averages are also available.)
+
+\paragraph{Alignment of correlator representations.}
+\label{subsec:repr-alignment}
+We collect two standardized feature matrices $\tilde Z^{\rm noBF}$ and $\tilde Z^{\rm BF}$
+on identical frames (each standardized by its own $\mu,\sigma$), compute their PC1 loadings
+$u_1^{\rm noBF}$ and $u_1^{\rm BF}$, and report the cosine similarity
+\[
+\cos\big(u_1^{\rm noBF},u_1^{\rm BF}\big)\;=\;
+\frac{\langle u_1^{\rm noBF},\,u_1^{\rm BF}\rangle}
+     {\|u_1^{\rm noBF}\|_2\,\|u_1^{\rm BF}\|_2}.
+\]
+Cosines near $1$ indicate that backflow acts as a structured reweighting along the same dominant axis,
+rather than rotating the correlator’s manifold.
+
+\paragraph{Centred kernel alignment.}
+The PC1 cosine compares one direction. To compare the two feature \emph{geometries} as a
+whole we use linear centred kernel alignment~\cite{Kornblith2019-CKA}. With
+$\tilde Z^{\rm noBF},\tilde Z^{\rm BF}\in\mathbb{R}^{K\times D}$ column-centred on the same
+$K$ frames,
+\begin{equation}
+  \mathrm{CKA}\big(\tilde Z^{\rm noBF},\tilde Z^{\rm BF}\big)
+  \;=\;
+  \frac{\big\|\,(\tilde Z^{\rm noBF})^{\!\top}\tilde Z^{\rm BF}\,\big\|_F^{2}}
+       {\big\|(\tilde Z^{\rm noBF})^{\!\top}\tilde Z^{\rm noBF}\big\|_F\;
+        \big\|(\tilde Z^{\rm BF})^{\!\top}\tilde Z^{\rm BF}\big\|_F} \;\in[0,1],
+  \label{eq:cka}
+\end{equation}
+which is invariant to orthogonal transformations and to isotropic scaling of either
+representation, and equals $1$ only when the two Gram matrices are proportional. It is the
+quantity reported in Table~\ref{tab:backflow-geom}. Two cautions attach to it. CKA compares
+the \emph{geometry of the feature cloud}, so a high value says the correlator's
+representation is unchanged by the presence of backflow---not that the backflow occupies the
+same subspace, and not that the two components are functionally independent. And CKA is
+known to saturate near $1$ whenever both representations are dominated by a few shared
+high-variance directions, which is exactly the regime here
+(\S\ref{subsec:repr-erank}); values above $0.99$ should therefore be read as ``no detectable
+reorganisation'' rather than as a quantitative distance.
+
+\paragraph{Uncertainty and stability.}
+\label{subsec:repr-uncertainty}
+For scalars we report standard errors over blocks.
+For PCA-based quantities and cosines we use a block bootstrap (resampling blocks with replacement)
+to obtain 68\%/95\% CIs. Stability checks include:
+(i) swapping train/held-out blocks for PCA,
+(ii) varying the near-field quantiles $q\in\{1,5,10\}\%$,
+(iii) re-running analyses on independent sampler restarts.
+
+\paragraph{Reproducibility package.}
+All diagnostics consume the saved bundles
+$\{\mathbf{X}_{\rm Bohr},\,r,\,g(r)\}$ and the model snapshot,
+and emit JSON/CSV tables with $r_{\rm eff}$, rel-MAE$(k)$ curves, block-power shares,
+$R^2$ probes, near-field shares, $r_{\rm eff}(\Delta x)$, and noBF/BF cosines.
+As in Sec.~\ref{sec:analysis-struct}, we log JSD/$\ell_2$ splits to confirm stationarity.
+
+\section{Tangent-kernel diagnostics}
+\label{sec:analysis-kernel}
+The representation diagnostics above describe the ansatz's \emph{features}; a second
+family, developed with the geometry of \S\ref{sec:theory-tangent-kernel}, describes its
+\emph{tangent space}, and it is these that carry the architecture, optimiser, and
+paradigm comparisons of Chapter~\ref{ch:kernel}. From a batch we assemble the centred
+score matrix $O_{ki}=\partial_{\theta_i}\log|\Psi_\theta(\mathbf x_k)|$ and form the
+quantum geometric tensor $S=O^{\!\top}O/B$ from the \emph{centred} $O$ (or, when $B<P$, the tangent kernel
+$K=OO^{\!\top}$, whose nonzero spectrum equals that of $S$ up to the overall factor $B$). From the spectrum
+$\{\lambda_a\}$ we report the effective dimension
+$d_{\mathrm{eff}}=(\sum_a\lambda_a)^2/\sum_a\lambda_a^2$ and the condition number
+$\kappa(S)=\lambda_{\max}/\lambda_{\min}$. Cross-architecture comparisons of
+$d_{\mathrm{eff}}$ are made on a \emph{common probe set} (all models scored on the same configurations, not on each model's own $|\Psi|^2$) so that the comparison reflects the
+ansatz and not its sampling measure, and we report only participation ratios that have
+converged in the batch size.
+
+\paragraph{A physical-operator dictionary.}
+Counting tangent directions says how many; naming them says which. We therefore project the
+leading tangent modes onto a small, fixed dictionary of one- and two-body operators chosen
+before the fits were run, each written as a scalar function of a configuration whose
+parameter-space image is obtained by the same score construction as $O$:
+\begin{equation}
+\begin{aligned}
+  \mathcal{D}_1 &= \textstyle\sum_i \tilde r_i^{\,2}
+    &&\text{breathing / monopole, the generator of $\partial_\omega$;}\\
+  \mathcal{D}_2 &= \textstyle\sum_i \tilde r_i^{\,2}\cos 2\theta_i
+    &&\text{quadrupole, the lowest shape distortion;}\\
+  \mathcal{D}_3 &= \textstyle\sum_{i<j} e^{-\tilde r_{ij}^{2}/2\sigma_h^{2}}
+    &&\text{correlation hole, with $\sigma_h$ the fitted hole width;}\\
+  \mathcal{D}_4 &= \textstyle\sum_{i<j} \tilde r_{ij}
+    &&\text{pair-linear, the leading long-range pair response.}
+\end{aligned}
+\label{eq:dictionary}
+\end{equation}
+Writing $D\in\mathbb{R}^{B\times4}$ for the centred matrix of these four functions on the
+probe batch and $v_a\in\mathbb{R}^{B}$ for the $a$th tangent-kernel eigenvector, the
+\emph{naming} score of a mode is the coefficient of determination of its least-squares
+regression on the dictionary,
+\begin{equation}
+  R^2_a \;=\; 1-\frac{\|(I-P_D)\,v_a\|^2}{\|v_a\|^2},
+  \qquad P_D=D(D^{\!\top}D)^{-1}D^{\!\top},
+  \label{eq:mode-naming}
+\end{equation}
+and the \emph{dictionary-orthogonal tangent mass} is the eigenvalue-weighted share of the
+leading $A$ modes lying outside that span,
+\begin{equation}
+  M_\perp \;=\; \frac{\sum_{a\le A}\lambda_a\,\|(I-P_D)v_a\|^2}{\sum_{a\le A}\lambda_a},
+  \qquad A=10 .
+  \label{eq:nonphys-mass}
+\end{equation}
+Finally, \emph{correlation-hole capture} is $R^2$ of Eq.~\eqref{eq:mode-naming} computed
+against the single operator $\mathcal{D}_3$, i.e.\ the share of the leading mode explained
+by the hole channel alone.
+
+The dictionary is a \emph{chosen, non-exhaustive} probe, and nothing here establishes that
+it spans the physically meaningful directions. A large $M_\perp$ means the tangent space is
+poorly accounted for by these four operators; it does not mean the remaining directions are
+unphysical. The comparison supports a relative statement between two architectures
+scored against the same dictionary on the same probe batch, and that is how
+Chapter~\ref{ch:kernel} uses it.
+
+\paragraph{Reporting the condition number.}
+$\kappa(S)=\lambda_{\max}/\lambda_{\min}$ is quoted with two caveats that its definition
+forces. Our batches have $B<P$, so $S$ is rank-deficient by construction and $\lambda_{\min}$
+is the smallest \emph{sample-supported} eigenvalue, not an intrinsic one; the value of
+$\kappa$ therefore depends on $B$ and is a property of the empirical metric the optimiser
+actually sees, not of the variational manifold. That is the relevant object for the question we ask of it, whether preconditioning by $S^{-1}$ helps, but it means $\kappa$ may not be
+compared across batch sizes, and we hold $B$ fixed wherever we compare it.
+
+To ask whether two trained models are the \emph{same} state rather than merely equal in
+energy, we use a symmetric, importance-sampled squared overlap,
+\[
+  \mathcal{S}^2(A,B)
+  = \big\langle \Psi_B/\Psi_A\big\rangle_{|\Psi_A|^2}\;
+    \big\langle \Psi_A/\Psi_B\big\rangle_{|\Psi_B|^2},
+\]
+each factor evaluated by a log-sum-exp mean over samples of the corresponding state.
+It equals $1$ for identical states, and on the analytic two-electron ground state the
+trained ansatz reproduces $\mathcal{S}^2=1.000000$, which anchors the tooling.
+
+One convention must be stated, because the ratio $\Psi_B/\Psi_A$ is signed for a
+fermionic state. We evaluate the ratios from $\log|\Psi|$, so the estimator is strictly a
+\emph{modulus} overlap, $\langle|\Psi_B/\Psi_A|\rangle\langle|\Psi_A/\Psi_B|\rangle$. For
+the comparisons made here this is an accurate proxy for the signed overlap: both states
+share the same Slater reference, and the correlator and cusp enter as a strictly positive
+exponential, so the sign of $\Psi$ is fixed by the determinant and the two states agree in
+sign except on the measure-suppressed set where their backflows carry a configuration
+across a node differently. The modulus overlap is an \emph{upper} bound on the signed one, so $\mathcal S^2\to0$ is
+conservative while $\mathcal S^2\approx1$ rests on the structural argument above rather than
+on the bound. Overlap, energy and $\Var(E_L)$ are properties of the state and are unaffected
+by how correlation is divided between the correlator and the backflow; the energetic price of
+ablating a component is not, since two parameterisations that divide correlation differently
+report different ablation costs.

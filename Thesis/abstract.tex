@@ -1,0 +1,55 @@
+\chapter*{Abstract}
+\addcontentsline{toc}{chapter}{Abstract}
+
+A neural network used as a variational wavefunction is judged by its energy. This thesis
+asks what the energy cannot see: two networks landing on the same number need not be the same
+object, a preconditioner decisive in one training regime does nothing in another, and an
+objective that reproduces a Markov chain's answer in one corner of the phase diagram departs
+from it in the next. The system is the two-dimensional harmonic quantum dot, from the
+kinetic-energy-dominated droplet to the dilute Wigner molecule, for $N\in\{2,6,12,20\}$
+electrons and confinements $\omega$ from $1$ to $10^{-3}$.
+
+The ansatz is a Slater determinant dressed by a neural Jastrow correlator, which reshapes the
+amplitude, and a coordinate backflow, which reshapes the nodes. Each exists in a separable
+form and a message-passing one. Training is by residual pretraining followed by stochastic
+reconfiguration, and separately by importance-sampled collocation that places no Markov chain
+in the gradient. The trained states are read through the geometry of their
+log-derivatives (the quantum geometric tensor and the neural tangent kernel) and through
+structural diagnostics of the electron arrangement. The energies reproduce all available published fixed-node
+diffusion-Monte-Carlo benchmarks, to $0.0008$--$0.04\%$; below $\omega=0.1$ for $N\ge6$ no
+benchmark exists, and those states are predictions.
+
+Message passing changes the variational geometry before it changes the energy. At strong
+confinement a message-passing correlator reaches the same reference-quality solution along
+about half as many effective tangent directions as a separable network of equal or greater
+capacity, and at every confinement far more of its tangent weight lies inside a compact
+dictionary of collective operators. The same advantage appears in the nodal channel: toward
+the Wigner regime a conventional backflow collapses spectrally to rank one and loses about
+half a percent in energy, whereas the message-passing field retains its rank. Holding the
+backflow fixed and swapping only the correlator moves the collapse boundary, which points to
+one relational bottleneck rather than two deficits.
+
+Natural-gradient preconditioning earns its cost where the tangent metric is anisotropic and
+still \emph{estimable}. Conditioning alone is not the criterion: under $|\Psi|^2$ sampling the
+empirical metric is badly conditioned on exactly the models where stochastic reconfiguration
+and Adam agree to four decimals.
+
+The trained states then serve as instruments, and the crossover they resolve is
+\emph{staged}: the cloud expands and its shells stiffen radially well before the electrons
+acquire angular order within them. A polygon shell model fitted on held-out frames reproduces
+the measured pair distribution far better than an angle-randomised null, and at
+$\omega=10^{-3}$ the twelve-electron dot forms a two-shell molecule with a modal $(3,9)$
+split while the twenty-electron dot collapses from three shells to a single ring within one
+decade in $\omega$.
+
+Those measurements return to the solver. A generic collocation proposal loses the Wigner
+state entirely; a proposal rebuilt from the measured shell geometry lifts the effective
+sample size by $15$--$32\times$ with no training at all and carries Markov-chain-free training
+to $\omega=0.0035$, where a different limit takes over---a transfer instability in the
+Slater--Jastrow cancellation that no change of proposal repairs.
+
+Two limitations qualify these results. Every state is the lowest found within a fixed
+spin-projection sector, and total spin is not scanned. The architecture comparison is seeded
+at $N{=}6$, rests on fewer models at $N{=}12$ and on a single production state at $N{=}20$,
+and the two backflow variants are not capacity-matched.
+\clearpage

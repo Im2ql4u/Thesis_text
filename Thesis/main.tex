@@ -1,0 +1,222 @@
+\documentclass{report}
+\usepackage{graphicx}
+\usepackage{caption}
+\usepackage{multirow}
+\usepackage{subcaption}
+\usepackage{float}  % Enables [H]
+\usepackage{amsmath}
+\usepackage{amssymb} % For advanced mathematical symbols
+\usepackage{fancyhdr}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{makecell}
+\usepackage[utf8]{inputenc}
+\usepackage{adjustbox}
+\usepackage{bm}
+\usepackage[numbers,sort&compress]{natbib} % in the preamble
+%\usepackage{newpxtext,newpxmath} 
+\usepackage[a4paper,margin=2.5cm]{geometry}
+\usepackage[expansion=false]{microtype}
+\usepackage{titlesec}
+\usepackage{xcolor}
+\usepackage{physics}
+\usepackage{braket}
+\usepackage{tikz}
+\usepackage{siunitx}
+\usepackage{makecell} % for multi-line cells in tables
+\usetikzlibrary{calc}
+\usetikzlibrary{arrows.meta,positioning,fit}
+\usepackage{placeins}  % \FloatBarrier: keep floats out of the middle of a paragraph
+\usepackage[flushleft]{threeparttable}  % provides the threeparttable and tablenotes environments
+% hyperref last: PDF outline, clickable TOC, cross-references and citations.
+% Link colours are muted so the printed page still reads as plain text.
+\usepackage[hidelinks,bookmarks=true,bookmarksnumbered=true,bookmarksopen=true,
+            bookmarksopenlevel=1,pdfusetitle]{hyperref}
+\usepackage{bookmark}
+
+\usetikzlibrary{positioning, arrows.meta, shapes.geometric}
+
+
+
+\usetikzlibrary{positioning, arrows.meta, shapes.geometric}
+
+% Define your professional hex colors:
+% ================== Colors (use your palette) ==================
+% Base hex colors
+\definecolor{mutedblue}{HTML}{1F77B4}
+\definecolor{deepwine}{HTML}{A13333}
+\definecolor{earthybrown}{HTML}{8c564b}
+\definecolor{mutedpurple}{HTML}{9467bd}
+
+% Lighter (50% white) versions for reduced saturation
+\colorlet{mutedblueLight}{mutedblue!20!white}
+\colorlet{deepwineLight}{deepwine!30!white}
+\colorlet{lightearthybrown}{earthybrown!30!white}
+\colorlet{lightmutedpurple}{mutedpurple!20!white}
+
+% Optional aliases to keep earlier code working (map my soft names to yours)
+\colorlet{softblue}{mutedblueLight}
+\colorlet{softpurple}{lightmutedpurple}
+\colorlet{softrose}{deepwineLight}
+\colorlet{softsand}{lightearthybrown}
+\colorlet{softteal}{mutedblueLight} % reuse light blue for pooling
+% ================================================================
+\definecolor{myaccent}{HTML}{a13333}
+% --- siunitx number formatting (decimals, not scientific notation) ---
+\sisetup{
+  scientific-notation = false, % disables 9.99×10^{-1} style
+  exponent-mode       = input, % don't auto-normalise exponents
+  round-mode          = places,
+  round-precision     = 5,     % choose: 3/4/5/etc.
+  round-pad           = false  % no forced trailing zeros
+}
+
+
+% helpers
+\newcommand{\pmnum}[2]{\num{#1}\,$\pm$\,\num{#2}}
+\newcommand{\powtrip}[3]{\num{#1}/\num{#2}/\num{#3}} % phi/psi/extras
+\newcommand{\nfshare}[2]{\num{#1}/\num{#2}}         % 5%/10% etc
+
+% put this in your preamble, after amsmath/amssymb
+\newcommand{\RR}{\mathbb{R}}        % expectation
+\newcommand{\EE}{\mathbb{E}}        % expectation
+
+% expectation & probability
+
+\newcommand{\PP}{\mathbb{P}}
+\newcommand{\KL}{\mathrm{D}_{\mathrm{KL}}}
+
+% variance & covariance
+\newcommand{\Var}{\mathrm{Var}}
+\newcommand{\Cov}{\mathrm{Cov}}
+
+% bold vectors (uses bm package you already load)
+\newcommand{\bx}{\bm{x}}
+\newcommand{\bz}{\bm{z}}
+\newcommand{\bw}{\bm{w}}
+\newcommand{\btheta}{\bm{\theta}}
+
+% distributions
+\newcommand{\calN}{\mathcal{N}}   % normal distribution symbol
+
+% convenience
+\usepackage{amsthm}
+\numberwithin{equation}{chapter}
+\newtheorem{theorem}{Theorem}[chapter]
+\newtheorem{lemma}[theorem]{Lemma}
+\newtheorem{proposition}[theorem]{Proposition}
+
+\usepackage{subcaption}
+\usepackage{graphicx}
+\newlength\figgutter
+\setlength{\figgutter}{0.3em} % tweak gutter size
+\newcommand{\threecolw}{\dimexpr(\textwidth-2\figgutter)/3\relax}
+
+\newcommand{\chapterepigraph}[3]{%
+  \begin{flushright}
+  \color{myaccent}\rule{0.48\textwidth}{0.5pt}\par\smallskip
+  \begin{minipage}{0.64\textwidth}
+  \raggedleft\large\itshape #1\par\smallskip
+  \normalfont\color{myaccent}\textsc{#2}\par
+  \normalfont\footnotesize\color{black}#3
+  \end{minipage}
+  \end{flushright}
+  \vspace{1.75em}%
+}
+
+\newcommand{\thesisepigraph}[3]{%
+  \thispagestyle{empty}
+  \vspace*{\fill}
+  \begin{center}
+  \color{myaccent}\rule{0.55\textwidth}{0.5pt}\par\smallskip
+  \begin{minipage}{0.68\textwidth}
+  \centering\large\itshape #1\par\medskip
+  \normalfont\color{myaccent}\textsc{#2}\par
+  \normalfont\footnotesize\color{black}#3
+  \end{minipage}
+  \end{center}
+  \vspace*{\fill}
+  \clearpage%
+}
+
+\titleformat{\chapter}
+  [display]  % display = title is on its own line
+  {\normalfont\huge\bfseries\color{myaccent}\raggedright}  % Style (ragged: no stretched chapter titles)
+  {\chaptername\ \thechapter}  % "Chapter 1"
+  {20pt}  % Space between number and title
+  {}  % Code before the title (none)
+
+
+\titleformat{\subsection}
+  {\normalfont\large\bfseries\color{black}}{\thesubsection}{1em}{}
+\titleformat{\section}
+  {\normalfont\Large\bfseries}  % Style of the title
+  {\thesection}{1em}            % Number formatting
+  {\vspace{0.0em}}              % Space before title
+  [\vspace{0.35em}{\color{myaccent}\rule{0.62\textwidth}{0.5pt}}]
+    % Small rule below the title
+\titlespacing*{\section}{0pt}{*3}{*1.4}
+
+% --- Running heads -------------------------------------------------------
+% The default `fancy' style puts \leftmark and \rightmark on the same line;
+% with the long chapter/section titles of Chapters 6 and 7 they overprint one
+% another. One mark on the left, the page number on the right.
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\nouppercase{\small\itshape\leftmark}}
+\fancyhead[R]{\small\thepage}
+\renewcommand{\headrulewidth}{0.4pt}
+\setlength{\headheight}{15pt}
+\fancypagestyle{plain}{%
+  \fancyhf{}%
+  \fancyfoot[C]{\small\thepage}%
+  \renewcommand{\headrulewidth}{0pt}%
+}
+
+\title{Physics-Informed Neural Quantum States for Quantum Dots:\\
+Tangent-Space Geometry, Message Passing, and Wigner Molecules}
+\author{Aleksander Sekkelsten}
+
+\date{\today}
+% Absorb small residual line-overflows document-wide (avoids overfull hboxes without shrinking content)
+\setlength{\emergencystretch}{2.5em}
+
+\begin{document}
+\maketitle
+
+
+\include{abstract}
+\include{preface}
+\tableofcontents
+\listoffigures
+\listoftables
+
+\part{Introduction}
+\input{introduction}
+
+\part{Theory}
+\input{theory}
+
+\part{Methods}
+\input{method}
+
+\part{Results}
+\input{results_intro}
+\input{results}
+\input{results_kernel}
+
+\part{Discussion and Conclusions}
+\input{discussion}
+\input{conclusion}
+
+\part{Appendices}
+\appendix
+\input{appendix}
+\include{ai_declaration}
+
+%\bibliographystyle{johd}
+\bibliographystyle{unsrtnat} 
+\bibliography{references}
+
+\end{document}
