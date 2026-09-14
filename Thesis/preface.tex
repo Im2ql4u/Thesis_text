@@ -15,102 +15,83 @@ to look out across the sea\par
 while you rest on the white sand.\par\medskip
 Perhaps you never noticed,\par
 but you swam so swiftly\par
-that no one saw you leave.\par
-The waves carried you\par\medskip
-while you simply lay there.\par\medskip
+that no one saw you leave.\par\medskip
+The waves carried you\par
+while you simply lay there.\par
 You reached for air\par
 as your vision faded.\par\medskip
-You open your mouth to cry out\par
-and that was when your chest began to burn.
+You gasp to call out\par
+and that was when your chest burned.
 \end{minipage}
 \end{center}
 \vspace{2em}
 
 When I came to UiO, Morten read my background and said: ``You know PINNs, you know
 many-body quantum systems. I want you to do PINNs on quantum dots.'' I said
-``sure'' and then asked the only sensible follow-up question I had:
-``Where do I start?''
+``sure.'' I knew enough about each of those things separately to imagine that putting
+them together would mostly be a technical problem.
 
-I did not realise then that this was the question I had been assigned to answer.
-This thesis is the long answer. The short answer is: start by arranging to be
-wrong in a way that can be measured.
+It was not.
 
-That is what variational methods make possible. The variational principle does
-not say how to improve a trial wavefunction, but it does guarantee that its
-energy lies above the ground-state energy. Improvement therefore has a direction:
-lower energy is better. For a project with few fixed landmarks,
-that was enough to begin. The harder task was learning what a disappointing
-result meant.
+The difficult part was rarely producing a result. The difficult part was knowing what
+a result meant. When something stopped improving, there were always several possible
+explanations. Perhaps the model was wrong for the problem, perhaps the optimisation was
+failing, perhaps the physics itself had become more difficult, or perhaps I had simply
+made a mistake somewhere along the way. Much of this thesis grew out of trying to tell
+those possibilities apart.
 
-It was a solitary problem, not for want of literature---neural quantum states,
-FermiNet, PauliNet, and neural backflow offered much to learn from---but because
-the particular route I was trying to take had little precedent. When an
-experiment failed, it was rarely clear whether the method was unsound, the
-architecture inadequate, the optimiser poorly matched to the problem, or the
-code quietly broken. For long stretches, I did not know. The work became an attempt to construct tests that could tell these
-explanations apart.
+The trouble with having so many explanations was that, as one after another failed to
+account for what I was seeing, a much simpler one began to acquire weight: perhaps it
+simply could not be done. At first it was only another possibility. Gradually, it became
+difficult to see past it.
 
-The most important lessons came from failures. An error in the
-importance-sampling code went undetected for months because its signature---loss
-of accuracy at larger particle numbers and weaker confinement---was exactly what
-an inadequate architecture might have produced. A small per-particle error in a log-density
-accumulates over the $N$ particles and is then exponentiated into the importance
-weights; the bug was invisible where experiments were cheap and
-ruinous where they mattered. Discovering it damaged my confidence in everything
-else. Re-establishing that confidence, rather than assuming it, became a
-substantial part of the later work.
+For a while, I stopped expecting the project to succeed.
 
-Other failures taught the same lesson from different directions. A Langevin
-refinement step introduced bias into the gradient. A second-order optimiser
-became least reliable when its estimated metric was too noisy to resolve.
-Neither result was useful merely because it was negative. Each exposed an
-assumption that had been invisible until the computation violated it. Negative
-results of this kind are not a concession or an embarrassment; they are part of
-the method, and I have written them up as such.
+I kept working, but for a different reason. If it could not be done, I wanted at least
+to understand why. In some ways, that became a more difficult problem than the original
+one. The worst periods were not those in which the method failed, but those in which I
+knew that it had failed and could not say what the failure meant.
 
-That diagnostic stance also changed what I thought the network was for. I began
-by asking whether a machine-learning construction could solve the many-body
-Schr\"odinger equation. I ended up using the trained state as an apparatus:
-something to examine for the structure it had captured and the directions of
-variation that mattered. That shift, from treating a network as an answer to
-treating it as an object of study, is the thread running through this thesis.
+I was fortunate to spend part of that period in Rome. 
+The city’s ethereal quality lifted my spirits and lent the days a sense of something 
+larger than the problem I happened to be working on.
+Yet it was my girlfriend Elida, more than anything, 
+who gave me a steadiness I could not have supplied for myself. 
+Her patience, warmth, 
+and faith in me carried me through more of this work than I know how to put into words.
 
-The work also made a connection harder to ignore. Its obstacles have a double
-character: each is at once a physics problem and an optimisation problem.
-Stochastic reconfiguration, developed for variational wavefunctions, is natural
-gradient descent on the variational manifold. The REINFORCE estimator from
-reinforcement learning is the score-function gradient of the variational energy.
-The Fisher information matrix of statistics is, for a real amplitude and up to a
-factor of four, the quantum geometric tensor of physics. The same mathematics appears under different names in different
-communities. Recognising that felt less like discovering a bridge between fields
-than like realising that the two fields had been approaching the same problem
-from opposite sides.
+Eventually, some of the mystery began to give way. Not every obstacle turned out to be
+profound. Some were almost embarrassingly ordinary. Things I had taken for limitations
+of the method occasionally turned out to be limitations of my own implementation; other
+failures, once understood properly, pointed toward more interesting questions than the
+ones I had originally been asking.
 
-Looking back, it is easy to make a catalogue of what I would now do differently.
-Most of that knowledge, however, was purchased by the failures and could not
-have been read off in advance. The regret and the result are the same object seen
-from two sides.
+That changed the way I looked at the project. A disappointing result was no longer
+merely something to overcome. Sometimes it contained information about the model,
+sometimes about the physics, and sometimes about the question itself. What began as an
+attempt to obtain a sufficiently good answer gradually became an attempt to understand
+what the answers, and the failures, were telling me.
 
 \bigskip
 
-The most consistent source of inspiration, motivation, and steadiness through all
-of it has been my girlfriend, Elida. Her support made it possible to begin this
-work and to stay with it when it became difficult. I am more grateful than I can
-put down here.
+I owe a warm and sincere thanks to my family, who have always made sure there was a home
+for me to return to, whenever I needed one. And to my friends, for countless
+conversations in which we tried to work out what we actually understood, and usually
+discovered that it was less than we thought.
 
-I owe a warm and sincere thanks to my family, who have supported me in every
-undertaking I have had and have simply always been there; and to my friends,
-inside CCSE and out, who supplied the joy, the laughter, and a good deal of the
-sanity this project required.
-
-To Morten, again, and properly: I thank you for the assignment, for the two years we've had together,
-and above all for a genuine and undisguised interest in what I was finding at
-every stage---including the stages where what I was finding was that I had been
-wrong. That interest is most of what encouragement actually consists of.
+To Morten, again, and properly: thank you for the assignment, for the two years we have
+had together, and above all for a genuine and undisguised interest in what I was finding
+at every stage, including the stages where what I found was that I had been wrong. That
+interest is most of what encouragement actually consists of.
 
 \bigskip
 
-Which is, at last, the answer to the question I asked on the first day. You start
-by being willing to be wrong on the record, and then you keep the record.
+When I look back, it is easy to make a catalogue of what I would now do differently.
+Most of that knowledge, however, was purchased by the failures and could not have been
+read off in advance. 
+
+I began this project thinking that the difficult part would be finding an answer to the
+many-body problem. More often, it was discovering which question a disappointing result
+was actually answering.
 
 \clearpage

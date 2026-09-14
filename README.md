@@ -1,7 +1,5 @@
 # Physics-Informed Neural Quantum States for Quantum Dots
 
-**Tangent-Space Geometry, Message Passing, and Wigner Molecules**
-
 Aleksander Sekkelsten
 
 LaTeX sources for the thesis text. This repository holds the manuscript and the
@@ -23,7 +21,7 @@ Or directly:
 cd Thesis && latexmk -pdf main.tex
 ```
 
-The current build is 121 pages.
+The current build is 128 pages.
 
 ## Layout
 
@@ -43,6 +41,8 @@ Thesis/
   appendix.tex          Part VI
   ai_declaration.tex
   references.bib
+  uiomasterfp.sty       UiO's official front page (Dept. of Informatics, v1.10)
+  uio-fp-*.pdf          logo and seal used by the front page
   main.pdf              committed build of the above
 
 results/figures/        figures referenced by \includegraphics
