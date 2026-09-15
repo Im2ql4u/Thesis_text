@@ -21,7 +21,7 @@ Or directly:
 cd Thesis && latexmk -pdf main.tex
 ```
 
-The current build is 128 pages.
+The current build is 130 pages.
 
 ## Layout
 
